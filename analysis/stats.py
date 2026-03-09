@@ -44,7 +44,7 @@ def variance(xs: list[float]) -> float:
     assert len(xs) >= 2, "la variance nécessite au moins deux éléments"
     n = len(xs)
     deviations = de_mean(xs)
-    return sum(x ** 2 for x in deviations) / (n - 1)
+    return sum(x ** 2 for x in deviations) / (n)
 
 
 """ ECART-TYPE, COVARIANCE, CORRELATION """

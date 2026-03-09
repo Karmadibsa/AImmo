@@ -2,7 +2,7 @@
 Regression lineaire simple from scratch.
 Reference : Joel Grus, "Data Science From Scratch", chapitre 14.
 
-IMPORTANT : N'importez pas sklearn, numpy ou scipy pour ces fonctions.
+IMPORTANT : N'importez pas  pour ces fonctions.
 """
 
 from analysis.stats import mean, variance, covariance

@@ -50,12 +50,10 @@ SEARCH_URLS: dict[str, str] = {
         "https://www.pap.fr/annonce/vente-appartement-maison-toulon-83"
         "-g43624-jusqu-a-500000-euros"
     ),
+    # URL navigateur standard (plus résistante aux changements Next.js que /classified-search)
     "seloger": (
-        "https://www.seloger.com/classified-search"
-        "?distributionTypes=Buy"
-        "&estateTypes=House,Apartment"
-        "&locations=AD08FR34378"
-        "&priceMax=500000"
+        "https://www.seloger.com/vente/appartements-maisons/var--83/toulon/"
+        "?prix_max=500000"
     ),
     "leboncoin": (
         "https://www.leboncoin.fr/recherche"
@@ -234,23 +232,46 @@ def _align_dvf_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 # ─── Nettoyage post-scraping ──────────────────────────────────────────────────
 
+
+# Domaines officiels attendus par scraper — toute URL hors-domaine est rejetée
+# (ex: PAP redirige les programmes neufs vers immoneuf.com)
+_DOMAINE_PAR_SITE: dict[str, str] = {
+    "pap":       "pap.fr",
+    "seloger":   "seloger.com",
+    "leboncoin": "leboncoin.fr",
+}
+
+
 def _clean(df: pd.DataFrame, logger, label: str) -> pd.DataFrame:
     """
     Nettoie un DataFrame d'annonces :
-      1. Supprime les doublons par URL (SeLoger répète les annonces premium)
-      2. Filtre les prix > PRIX_MAX (certains sites ignorent le filtre URL)
-      3. Supprime les lignes sans prix ET sans surface (données inutilisables)
+      1. Supprime les doublons par URL
+      2. Filtre les URLs hors-domaine (ex : PAP → immoneuf.com)
+      3. Filtre les prix > PRIX_MAX
+      4. Supprime les annonces sans surface (inutilisables pour l'analyse)
     """
     n_avant = len(df)
 
-    # 1. Dédoublonnage sur l'URL (garde la première occurrence)
+    # 1. Dédoublonnage sur l'URL normalisée (sans query string de pagination)
     if "url" in df.columns:
         df = df.drop_duplicates(subset=["url"], keep="first")
         n_dup = n_avant - len(df)
         if n_dup:
             logger.info(f"[{label.upper()}] {n_dup} doublons supprimés (même URL)")
 
-    # 2. Filtre prix > 500 000 €
+    # 2. Filtre les URLs hors-domaine (ne s'applique qu'aux passes par-site, pas "all")
+    domaine_attendu = _DOMAINE_PAR_SITE.get(label)
+    if domaine_attendu and "url" in df.columns:
+        masque_domaine = df["url"].isna() | df["url"].str.contains(domaine_attendu, na=False)
+        n_hors_domaine = (~masque_domaine).sum()
+        df = df[masque_domaine]
+        if n_hors_domaine:
+            logger.info(
+                f"[{label.upper()}] {n_hors_domaine} annonces hors-domaine supprimees "
+                f"(URL hors '{domaine_attendu}' - ex: redirections partenaires)"
+            )
+
+    # 3. Filtre prix > 500 000 €
     if "prix" in df.columns:
         masque_prix = df["prix"].isna() | (df["prix"] <= PRIX_MAX)
         n_hors_budget = (~masque_prix).sum()
@@ -258,13 +279,13 @@ def _clean(df: pd.DataFrame, logger, label: str) -> pd.DataFrame:
         if n_hors_budget:
             logger.info(f"[{label.upper()}] {n_hors_budget} annonces > {PRIX_MAX:,} € supprimées")
 
-    # 3. Supprime les lignes sans prix ET sans surface (données vides)
-    if "prix" in df.columns and "surface" in df.columns:
-        masque_vide = df["prix"].isna() & df["surface"].isna()
-        n_vide = masque_vide.sum()
-        df = df[~masque_vide]
-        if n_vide:
-            logger.info(f"[{label.upper()}] {n_vide} lignes sans prix ni surface supprimées")
+    # 4. Supprime les annonces sans surface (inutilisables pour l'analyse immobilière)
+    if "surface" in df.columns:
+        masque_sans_surface = df["surface"].isna()
+        n_sans_surface = masque_sans_surface.sum()
+        df = df[~masque_sans_surface]
+        if n_sans_surface:
+            logger.info(f"[{label.upper()}] {n_sans_surface} annonces sans surface supprimées")
 
     return df.reset_index(drop=True)
 

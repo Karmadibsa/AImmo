@@ -63,6 +63,13 @@ class SeLogerScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         tag = soup.find("script", id="__NEXT_DATA__")
         if not tag or not tag.string:
+            # Diagnostic : titre de la page pour comprendre ce qui a été renvoyé
+            title = soup.find("title")
+            logger.warning(
+                f"[SELOGER] __NEXT_DATA__ absent "
+                f"(HTML: {len(html):,} chars, titre: {title.get_text() if title else 'aucun'}). "
+                "FlareSolverr a peut-être renvoyé une page bloquée."
+            )
             return []
 
         try:
@@ -73,7 +80,7 @@ class SeLogerScraper(BaseScraper):
 
         page_props = data.get("props", {}).get("pageProps", {})
 
-        # Différents chemins selon la version du site SeLoger
+        # Chemins connus selon les différentes versions du site SeLoger
         ads = (
             page_props.get("classifieds")
             or page_props.get("listings")
@@ -82,13 +89,69 @@ class SeLogerScraper(BaseScraper):
             or (page_props.get("initialData") or {}).get("classifieds")
             or (page_props.get("searchData") or {}).get("listings")
             or (page_props.get("data") or {}).get("classifieds")
+            or (page_props.get("result") or {}).get("classifieds")
+            or (page_props.get("search") or {}).get("classifieds")
+            or (page_props.get("listingData") or {}).get("classifieds")
         )
 
         if not ads or not isinstance(ads, list):
-            logger.debug("[SELOGER] Chemin classifieds non trouvé dans __NEXT_DATA__")
-            return []
+            # Diagnostic : affiche les clés disponibles pour aider à corriger le chemin
+            top_keys = sorted(page_props.keys()) if isinstance(page_props, dict) else []
+            logger.warning(
+                f"[SELOGER] Aucun chemin connu dans __NEXT_DATA__. "
+                f"Clés pageProps : {top_keys}"
+            )
+            # Dernier recours : recherche récursive dans tout le JSON
+            ads = self._find_classifieds_recursive(data)
+            if ads:
+                logger.info(f"[SELOGER] Recherche récursive → {len(ads)} annonces")
+            else:
+                logger.warning("[SELOGER] Recherche récursive : 0 annonce trouvée")
+                return []
 
         return [self._normalize_classified(ad) for ad in ads if isinstance(ad, dict)]
+
+    def _find_classifieds_recursive(
+        self, obj, depth: int = 0, max_depth: int = 8
+    ) -> list[dict]:
+        """
+        Recherche récursive dans __NEXT_DATA__ une liste ressemblant à des annonces
+        (contient 'price', 'surface', 'rooms', etc.). Dernier recours quand les
+        chemins JSON connus ne fonctionnent plus (SeLoger change souvent de structure).
+        """
+        AD_KEYS = {"price", "pricing", "surface", "rooms", "propertyType", "listingId"}
+
+        def _is_ad_list(lst: list) -> bool:
+            if len(lst) < 2:
+                return False
+            hits = sum(
+                1 for item in lst[:5]
+                if isinstance(item, dict) and AD_KEYS & set(item.keys())
+            )
+            return hits >= 2
+
+        if depth > max_depth:
+            return []
+        if isinstance(obj, list) and _is_ad_list(obj):
+            return [x for x in obj if isinstance(x, dict)]
+        if isinstance(obj, dict):
+            for key in ("classifieds", "listings", "ads", "results", "items"):
+                if key in obj and isinstance(obj[key], list):
+                    result = self._find_classifieds_recursive(obj[key], depth + 1, max_depth)
+                    if result:
+                        return result
+            for val in obj.values():
+                if isinstance(val, (dict, list)):
+                    result = self._find_classifieds_recursive(val, depth + 1, max_depth)
+                    if result:
+                        return result
+        if isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, (dict, list)):
+                    result = self._find_classifieds_recursive(item, depth + 1, max_depth)
+                    if result:
+                        return result
+        return []
 
     def _normalize_classified(self, ad: dict) -> dict:
         """Normalise une annonce brute SeLoger en listing standard."""

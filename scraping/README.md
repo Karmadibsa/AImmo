@@ -58,7 +58,34 @@ python -m scraping.run_scraping --flaresolverr http://flaresolverr:8191
 
 # ── Changer le dossier de sortie ──
 python -m scraping.run_scraping --output data/scraping
+
+# ── Sauvegarder le HTML brut pour déboguer (structure HTML changée ?) ──
+python -m scraping.run_scraping --save-html debug_html/
 ```
+
+---
+
+## Lancer le scheduler (automatique toutes les N heures)
+
+Le scheduler lance `run_scraping` en sous-processus à intervalles réguliers.
+Stopper avec **Ctrl+C**.
+
+```bash
+# ── Scraping toutes les heures (défaut) — lance un premier run immédiatement ──
+python -m scraping.scheduler
+
+# ── Toutes les 2 heures ──
+python -m scraping.scheduler --interval 2
+
+# ── Attendre 1 heure avant le premier run (ne pas lancer immédiatement) ──
+python -m scraping.scheduler --no-now
+
+# ── Toutes les 30 minutes ──
+python -m scraping.scheduler --interval 0.5
+```
+
+> **Note** : Le scheduler n'a pas besoin de redémarrer FlareSolverr.
+> Si un run échoue (FlareSolverr coupé, site down…), il log l'erreur et réessaie automatiquement au prochain cycle.
 
 ---
 
@@ -68,7 +95,7 @@ Le CSV est **écrasé à chaque run** avec un nom fixe (pas de timestamp)
 pour que le frontend puisse toujours lire le même fichier.
 
 ```
-donnees/
+data/
 └── annonces.csv     # ← LU PAR LE FRONT (tous sites combinés : PAP + SeLoger + LeBoncoin)
 ```
 
@@ -106,7 +133,8 @@ scraping/
 ├── README.md                    ← ce fichier
 ├── __init__.py
 ├── flaresolverr_client.py       ← Client HTTP pour FlareSolverr (sessions, GET)
-├── run_scraping.py              ← Script CLI principal
+├── run_scraping.py              ← Script CLI principal (scraping ponctuel)
+├── scheduler.py                 ← Scheduler automatique (toutes les N heures)
 └── scrapers/
     ├── __init__.py
     ├── base.py                  ← Classe de base (pagination, CSV, helpers)

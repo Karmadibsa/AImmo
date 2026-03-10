@@ -38,6 +38,8 @@ PRIX_MAX = 500_000          # filtre côté client (certains sites ignorent le f
 import pandas as pd
 
 from scraping.flaresolverr_client import FlareSolverrClient
+from scraping.scrapers.bienici import BienIciScraper
+from scraping.scrapers.figaro import FigaroScraper
 from scraping.scrapers.leboncoin import LeboncoinScraper
 from scraping.scrapers.pap import PapScraper
 from scraping.scrapers.seloger import SeLogerScraper
@@ -62,12 +64,24 @@ SEARCH_URLS: dict[str, str] = {
         "&price=min-500000"
         "&real_estate_type=1,2"
     ),
+    # Agrégateur majeur (agences + particuliers) — moins bloqué que SeLoger
+    "bienici": (
+        "https://www.bienici.com/recherche/achat/appartement,maison"
+        "/toulon-83000/?prix-max=500000"
+    ),
+    # Portail presse Figaro — généralement moins protégé
+    "figaro": (
+        "https://immobilier.lefigaro.fr/annonces/immobilier-vente"
+        "/toulon-83000.html"
+    ),
 }
 
 SCRAPERS: dict[str, type] = {
-    "pap": PapScraper,
-    "seloger": SeLogerScraper,
+    "pap":       PapScraper,
+    "seloger":   SeLogerScraper,
     "leboncoin": LeboncoinScraper,
+    "bienici":   BienIciScraper,
+    "figaro":    FigaroScraper,
 }
 
 OUTPUT_DIR = Path("data")
@@ -239,6 +253,8 @@ _DOMAINE_PAR_SITE: dict[str, str] = {
     "pap":       "pap.fr",
     "seloger":   "seloger.com",
     "leboncoin": "leboncoin.fr",
+    "bienici":   "bienici.com",
+    "figaro":    "lefigaro.fr",
 }
 
 
@@ -307,7 +323,7 @@ def _parse_args() -> argparse.Namespace:
         "--site",
         choices=[*SCRAPERS.keys(), "all"],
         default="all",
-        help="Site à scraper : pap | seloger | leboncoin | all (défaut: all)",
+        help="Site a scraper : pap | seloger | leboncoin | bienici | figaro | all (defaut: all)",
     )
     parser.add_argument(
         "--flaresolverr",

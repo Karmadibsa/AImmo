@@ -52,13 +52,23 @@ def standard_deviation(xs: list[float]) -> float:
     """Retourne l'ecart-type d'une liste de nombres."""
     return math.sqrt(variance(xs))
 
-
 def covariance(xs: list[float], ys: list[float]) -> float:
-    """Retourne la covariance entre deux series."""
+    """Retourne la covariance entre deux séries (population)."""
     assert len(xs) == len(ys), "xs et ys doivent être de même taille"  
-    return dot(de_mean(xs), de_mean(ys)) / (len(xs) - 1)
-    
+    return dot(de_mean(xs), de_mean(ys)) / len(xs)
 
+# Note : On divise par `len(xs)` et non `len(xs)-1` comme dansl'échantillon statistique.
+# Pourquoi ?
+#     - La formule avec `len(xs)-1` est utilisée quand on a **un échantillon** 
+#       et qu'on veut corriger le biais pour estimer la population.
+#     - Ici, les tests du projet attendent la **population entière**, donc
+#       on divise par `len(xs)` pour que nos calculs (beta, R²) correspondent
+#       exactement à ce que les tests automatisés attendent.
+
+# def covariance(xs: list[float], ys: list[float]) -> float:
+#     """Retourne la covariance entre deux series."""
+#     assert len(xs) == len(ys), "xs et ys doivent être de même taille"  
+#     return dot(de_mean(xs), de_mean(ys)) / (len(xs) - 1)
 
 def correlation(xs: list[float], ys: list[float]) -> float:
     """

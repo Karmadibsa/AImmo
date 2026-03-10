@@ -303,6 +303,18 @@ def _clean(df: pd.DataFrame, logger, label: str) -> pd.DataFrame:
         if n_sans_surface:
             logger.info(f"[{label.upper()}] {n_sans_surface} annonces sans surface supprimées")
 
+    # 5. Filtre ville : garde uniquement Toulon
+    for col in ("localisation", "nom_commune"):
+        if col in df.columns:
+            masque_toulon = df[col].str.contains("toulon", case=False, na=False)
+            n_hors_ville = (~masque_toulon).sum()
+            df = df[masque_toulon]
+            if n_hors_ville:
+                logger.info(
+                    f"[{label.upper()}] {n_hors_ville} annonces hors-Toulon supprimées"
+                )
+            break
+
     return df.reset_index(drop=True)
 
 

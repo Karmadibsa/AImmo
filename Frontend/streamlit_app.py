@@ -56,7 +56,7 @@ st.markdown("""
 CSV_PATH = Path(__file__).parent.parent / "data" / "annonces.csv"
 
 
-@st.cache_data(ttl=3600)   # Cache 1h — se rafraîchit avec le workflow GitHub Actions
+@st.cache_data(ttl=300)    # Cache 5min — se rafraîchit avec le workflow GitHub Actions
 def load_data() -> pd.DataFrame:
     if not CSV_PATH.exists():
         return pd.DataFrame()

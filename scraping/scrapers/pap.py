@@ -170,33 +170,34 @@ class PapScraper(BaseScraper):
 
     def _parse_html(self, html: str) -> list[dict]:
         """
-        Parsing HTML des résultats PAP.
-        PAP utilise une structure sémantique :
-          <article class="search-item"> ou <li class="search-item">
-          avec h2 pour le titre, .price / .prix pour le prix, etc.
+        Parsing HTML des résultats PAP (structure vérifiée en mars 2026).
+
+        Structure actuelle de PAP :
+          <div class="search-list-item-alt">
+            <a class="item-title" href="/annonces/appartement-toulon-83000-rXXX">
+            <span class="item-price">370.000 €</span>
+            <span class="h1">Toulon (83000)</span>        ← localisation
+            <p class="item-description">description...</p>
+          </div>
         """
         soup = BeautifulSoup(html, "lxml")
         results = []
 
-        # Différents sélecteurs selon la version du template PAP
-        containers: list[Tag] = (
-            soup.select("article.search-item")
-            or soup.select("li.search-item")
-            or soup.select("[class*='search-item']")
-            or soup.select("[class*='listing-item']")
-            or soup.select("[class*='result-item']")
-            or soup.select("article[data-id]")
-            or soup.select("li[data-id]")
-            # Sélecteurs pour les versions récentes de PAP (React/Next.js)
-            or soup.select("article[class*='card']")
-            or soup.select("[class*='Card']")
-            or soup.select("[data-testid*='ad']")
-            or soup.select("[data-testid*='listing']")
-            or soup.select("[data-testid*='result']")
-        )
+        # Sélecteur principal (vérifié sur le HTML réel)
+        containers: list[Tag] = soup.select("div.search-list-item-alt")
+
+        # Fallbacks si PAP change encore de structure
+        if not containers:
+            containers = (
+                soup.select("article.search-item")
+                or soup.select("li.search-item")
+                or soup.select("[class*='search-item']")
+                or soup.select("[class*='listing-item']")
+                or soup.select("article[data-id]")
+                or soup.select("li[data-id]")
+            )
 
         if not containers:
-            # Diagnostic : affiche un extrait du HTML pour aider
             page_title = soup.find("title")
             logger.warning(
                 f"[PAP] Aucun container trouvé. "
@@ -206,7 +207,6 @@ class PapScraper(BaseScraper):
         for container in containers:
             try:
                 listing = self._extract_from_container(container)
-                # On ne garde que les annonces avec au moins un champ utile
                 if listing.get("titre") or listing.get("prix"):
                     results.append(listing)
             except Exception as e:
@@ -215,72 +215,79 @@ class PapScraper(BaseScraper):
         return results
 
     def _extract_from_container(self, el: Tag) -> dict:
-        """Extrait les champs d'un container d'annonce PAP."""
-        # ── Lien + URL ────────────────────────────────────────────────────────
-        link = el.find("a", href=True)
+        """
+        Extrait les champs d'un container d'annonce PAP.
+        Structure réelle (mars 2026) : div.search-list-item-alt
+        """
+        text = el.get_text(" ", strip=True)
+
+        # ── URL + type de bien (dans le href) ─────────────────────────────────
+        # PAP inclut "appartement" ou "maison" dans le slug de l'URL
+        link = el.find("a", class_="item-title") or el.find("a", href=True)
         url = ""
         if link:
-            href = link["href"]
+            href = link.get("href", "")
             url = href if href.startswith("http") else BASE_URL + href
-
-        # ── Titre ─────────────────────────────────────────────────────────────
-        title_el = (
-            el.find("h2")
-            or el.find("h3")
-            or el.find(class_=re.compile(r"title|titre", re.I))
-        )
-        titre = title_el.get_text(strip=True) if title_el else ""
-
-        # ── Texte complet (pour regex) ────────────────────────────────────────
-        text = el.get_text(" ", strip=True)
 
         # ── Prix ──────────────────────────────────────────────────────────────
         prix = None
-        price_el = el.find(class_=re.compile(r"price|prix", re.I))
+        price_el = el.find("span", class_="item-price")
         if price_el:
             prix = self._to_float(price_el.get_text())
         else:
-            # Pattern : "150 000 €" ou "150000€"
-            m = re.search(r"([\d][\d\s\u00a0\u202f]*)\s*€", text)
+            m = re.search(r"([\d][\d\s\u00a0\u202f\.]*)\s*€", text)
             if m:
                 prix = self._to_float(m.group(1))
 
-        # ── Surface ───────────────────────────────────────────────────────────
-        surface = None
-        surface_el = el.find(class_=re.compile(r"surface", re.I))
-        if surface_el:
-            surface = self._to_float(surface_el.get_text())
+        # ── Localisation : span.h1 contient "Toulon (83000)" ──────────────────
+        localisation = ""
+        loc_el = el.find("span", class_="h1")
+        if loc_el:
+            localisation = loc_el.get_text(strip=True)
         else:
-            m = re.search(r"([\d][,.\d]*)\s*m²", text)
+            # Fallback regex : "Ville (83000)"
+            m = re.search(r"([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s\-]*\s*\(\s*\d{5}\s*\))", text)
             if m:
-                surface = self._to_float(m.group(1))
+                localisation = m.group(1).strip()
+            else:
+                m = re.search(r"\b(\d{5})\b", text)
+                if m:
+                    localisation = m.group(1)
 
-        # ── Nombre de pièces ──────────────────────────────────────────────────
+        # ── Description : p.item-description ─────────────────────────────────
+        desc_el = el.find("p", class_="item-description")
+        if not desc_el:
+            desc_el = el.find(class_=re.compile(r"desc|summary|body", re.I))
+        description = desc_el.get_text(strip=True) if desc_el else ""
+
+        # ── Surface : regex sur le texte complet ──────────────────────────────
+        surface = None
+        m = re.search(r"(\d+(?:[,.]\d+)?)\s*m²", text)
+        if m:
+            surface = self._to_float(m.group(1))
+
+        # ── Nombre de pièces : regex ──────────────────────────────────────────
         nb_pieces = None
         m = re.search(r"(\d+)\s*pièce", text, re.I)
         if m:
             nb_pieces = int(m.group(1))
         else:
-            # Cherche aussi "3P", "4P" (abréviations courantes)
             m = re.search(r"\b(\d+)\s*[Pp]\b", text)
-            if m:
+            if m and int(m.group(1)) <= 20:  # sanity check
                 nb_pieces = int(m.group(1))
 
-        # ── Localisation ──────────────────────────────────────────────────────
-        loc_el = el.find(class_=re.compile(r"location|localisation|city|ville|town", re.I))
-        localisation = loc_el.get_text(strip=True) if loc_el else ""
-        if not localisation:
-            # Regex code postal français (5 chiffres)
-            m = re.search(r"\b(\d{5})\b", text)
-            if m:
-                localisation = m.group(1)
+        # ── Type de bien : depuis l'URL (slug PAP) ────────────────────────────
+        type_bien = self._normalize_type_bien(url)
 
-        # ── Description ───────────────────────────────────────────────────────
-        desc_el = el.find(class_=re.compile(r"desc|summary|body|text|content", re.I))
-        description = desc_el.get_text(strip=True) if desc_el else ""
-
-        # Type de bien : depuis le titre ou l'URL (PAP met "appartement"/"maison" dedans)
-        type_bien = self._normalize_type_bien(titre) or self._normalize_type_bien(url)
+        # ── Titre : reconstruit à partir des informations extraites ───────────
+        parts = [type_bien or ""]
+        if nb_pieces:
+            parts.append(f"{nb_pieces} pièce{'s' if nb_pieces > 1 else ''}")
+        if surface:
+            parts.append(f"{int(surface)} m²")
+        if localisation:
+            parts.append(localisation)
+        titre = " – ".join(filter(None, parts))
 
         return {
             "source": self.SOURCE,

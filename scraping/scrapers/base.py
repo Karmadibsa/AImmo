@@ -208,12 +208,22 @@ class BaseScraper(ABC):
             return None
         s = re.sub(r"[€$£\s\u00a0\u202f]", "", str(val).strip())  # retire symboles + espaces
         s = re.sub(r"[m²/]", "", s)  # retire unités
-        # Format FR "1 234,56" → "1234.56"
+        # Format FR "1 234,56" → "1234.56" (espace/NBSP comme séparateur de milliers)
         if "," in s and "." in s:
-            # Le point est le séparateur de milliers → l'enlever, virgule = décimale
+            # Les deux présents : point = milliers, virgule = décimale  (ex: "1.234,56")
             s = s.replace(".", "").replace(",", ".")
         elif "," in s:
-            s = s.replace(",", ".")
+            # Virgule seule : peut être décimale (ex: "45,5") ou milliers (ex: "1,234" rare en FR)
+            # Si la partie après la virgule a exactement 3 chiffres, c'est un millier
+            if re.search(r",\d{3}$", s):
+                s = s.replace(",", "")
+            else:
+                s = s.replace(",", ".")
+        elif "." in s:
+            # Point seul : peut être décimale (ex: "45.5") ou milliers FR (ex: "370.000")
+            # Si le point est suivi de exactement 3 chiffres → séparateur de milliers
+            if re.search(r"\.\d{3}$", s) or re.search(r"\d+(\.\d{3})+$", s):
+                s = s.replace(".", "")
         s = re.sub(r"[^\d.]", "", s)
         try:
             return float(s) if s else None

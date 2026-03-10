@@ -1,6 +1,16 @@
 """
 Scraper pour LeBoncoin.fr.
 
+⚠️  STATUT (mars 2026) : LeBoncoin est protégé par DataDome, un système anti-bot
+    que FlareSolverr ne peut PAS contourner (différent de Cloudflare).
+    FlareSolverr reçoit une page d'interstitiel DataDome au lieu du contenu réel.
+    Le scraper retourne systématiquement 0 annonces pour cette raison.
+
+    Solutions possibles pour débloquer LeBoncoin :
+      - Utiliser l'API officielle LeBoncoin (nécessite clé API)
+      - Proxy résidentiel rotatif (coût)
+      - Remplacement par un autre site (BienIci, Immo.notaires, Logic-Immo…)
+
 Stratégie principale : extraction du JSON __NEXT_DATA__ injecté par Next.js.
   → Chemin : props.pageProps.searchData.ads (+ variantes)
   → Chaque annonce contient : subject, price, attributes (surface/pièces),

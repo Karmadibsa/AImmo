@@ -6,7 +6,7 @@ Le résultat est sauvegardé dans un unique fichier CSV avec un nom fixe
 (pas de timestamp) pour que le frontend puisse toujours lire le même fichier.
 
 Fichier généré (écrasé à chaque run) :
-  donnees/annonces.csv       ← tous sites combinés, lu par le front
+  data/annonces.csv       ← tous sites combinés, lu par le front
 
 Usage :
   # Scraper tous les sites (toutes les pages disponibles)
@@ -71,7 +71,7 @@ SCRAPERS: dict[str, type] = {
     "leboncoin": LeboncoinScraper,
 }
 
-OUTPUT_DIR = Path("donnees")
+OUTPUT_DIR = Path("data")
 
 
 # ─── Entrée principale ────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ def main() -> None:
     logger.info(f"  FlareSolverr : {args.flaresolverr}")
     logger.info(f"  Sites        : {', '.join(sites)}")
     logger.info(f"  Pages max    : {args.max_pages} (s'arrête dès qu'une page est vide)")
-    logger.info(f"  Sortie       : {output_dir}/  [noms fixes, écrasés à chaque run]")
+    logger.info(f"  Sortie       : {output_dir}/annonces.csv  [nom fixe, écrasé à chaque run]")
     logger.info("=" * 60)
 
     all_dfs: list[pd.DataFrame] = []

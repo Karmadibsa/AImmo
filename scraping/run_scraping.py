@@ -2,13 +2,20 @@
 Script principal de scraping immobilier via FlareSolverr.
 
 Scrape PAP.fr, SeLoger.com et LeBoncoin.fr pour les biens à Toulon (≤ 500 000 €).
-Les résultats sont sauvegardés dans donnees/ sous forme de CSV.
+Les résultats sont sauvegardés dans donnees/ sous forme de CSV avec des noms fixes
+(pas de timestamp) pour que le frontend puisse toujours lire le même fichier.
+
+Fichiers générés (écrasés à chaque run) :
+  donnees/scraping_pap.csv
+  donnees/scraping_seloger.csv
+  donnees/scraping_leboncoin.csv
+  donnees/scraping_all.csv       ← fichier combiné lu par le front
 
 Usage :
-  # Scraper tous les sites (3 pages par défaut)
+  # Scraper tous les sites (toutes les pages disponibles)
   python -m scraping.run_scraping
 
-  # Changer le nombre de pages
+  # Limiter le nombre de pages (utile pour tester)
   python -m scraping.run_scraping --max-pages 5
 
   # Scraper un seul site
@@ -23,6 +30,11 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+
+# Nombre max de pages par défaut — valeur volontairement élevée.
+# Le scraper s'arrête tout seul dès qu'une page ne renvoie aucune annonce,
+# donc cette limite n'est qu'un filet de sécurité anti-boucle infinie.
+MAX_PAGES_DEFAULT = 50
 
 import pandas as pd
 
@@ -80,15 +92,15 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     sites = list(SCRAPERS.keys()) if args.site == "all" else [args.site]
-    date_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    scraped_at = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     logger.info("=" * 60)
     logger.info("  SCRAPING IMMOBILIER TOULON — ≤ 500 000 €")
     logger.info("=" * 60)
     logger.info(f"  FlareSolverr : {args.flaresolverr}")
     logger.info(f"  Sites        : {', '.join(sites)}")
-    logger.info(f"  Pages max    : {args.max_pages}")
-    logger.info(f"  Sortie       : {output_dir}/")
+    logger.info(f"  Pages max    : {args.max_pages} (s'arrête dès qu'une page est vide)")
+    logger.info(f"  Sortie       : {output_dir}/  [noms fixes, écrasés à chaque run]")
     logger.info("=" * 60)
 
     all_dfs: list[pd.DataFrame] = []
@@ -107,8 +119,8 @@ def main() -> None:
                 df = scraper.to_dataframe()
                 all_dfs.append(df)
 
-                # CSV individuel par site
-                csv_path = output_dir / f"scraping_{site}_{date_str}.csv"
+                # CSV individuel par site — nom fixe (écrasé à chaque run)
+                csv_path = output_dir / f"scraping_{site}.csv"
                 scraper.save_csv(str(csv_path))
 
     except ConnectionError as exc:
@@ -120,21 +132,22 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # ─── Fichier combiné ──────────────────────────────────────────────────────
+    # ─── Fichier combiné — nom fixe lu par le front ───────────────────────────
     if all_dfs:
         df_all = pd.concat(all_dfs, ignore_index=True)
-        combined_path = output_dir / f"scraping_all_{date_str}.csv"
+        combined_path = output_dir / "scraping_all.csv"       # nom FIXE
         df_all.to_csv(combined_path, index=False, encoding="utf-8-sig")
 
         logger.info(f"\n{'=' * 60}")
         logger.info("  RÉSUMÉ FINAL")
         logger.info(f"{'=' * 60}")
-        logger.info(f"  Total annonces scrappées : {len(df_all)}")
+        logger.info(f"  Scraping effectué le : {scraped_at}")
+        logger.info(f"  Total annonces       : {len(df_all)}")
         for source in df_all["source"].unique():
             n = len(df_all[df_all["source"] == source])
             prix_med = df_all.loc[df_all["source"] == source, "prix"].median()
             logger.info(f"    • {source:<12} : {n:>4} annonces  |  prix médian: {prix_med:,.0f} €")
-        logger.info(f"\n  Fichier combiné : {combined_path}")
+        logger.info(f"\n  Fichier combiné (front) : {combined_path}")
         logger.info(f"{'=' * 60}\n")
     else:
         logger.warning("Aucune annonce récupérée. Vérifiez FlareSolverr et les URLs.")
@@ -149,9 +162,9 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-pages",
         type=int,
-        default=3,
+        default=MAX_PAGES_DEFAULT,
         metavar="N",
-        help="Nombre de pages à scraper par site (défaut: 3)",
+        help=f"Nombre max de pages par site (défaut: {MAX_PAGES_DEFAULT}, s'arrête dès qu'une page est vide)",
     )
     parser.add_argument(
         "--site",

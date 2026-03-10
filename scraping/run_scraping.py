@@ -35,6 +35,7 @@ from pathlib import Path
 # Le scraper s'arrête tout seul dès qu'une page ne renvoie aucune annonce,
 # donc cette limite n'est qu'un filet de sécurité anti-boucle infinie.
 MAX_PAGES_DEFAULT = 50
+PRIX_MAX = 500_000          # filtre côté client (certains sites ignorent le filtre URL)
 
 import pandas as pd
 
@@ -117,11 +118,15 @@ def main() -> None:
 
                 results = scraper.scrape(url, max_pages=args.max_pages)
                 df = scraper.to_dataframe()
+
+                # ── Nettoyage par site ─────────────────────────────────────
+                df = _clean(df, logger, site)
                 all_dfs.append(df)
 
                 # CSV individuel par site — nom fixe (écrasé à chaque run)
                 csv_path = output_dir / f"scraping_{site}.csv"
-                scraper.save_csv(str(csv_path))
+                df.to_csv(str(csv_path), index=False, encoding="utf-8-sig")
+                logger.info(f"[{site.upper()}] Sauvegardé : {csv_path} ({len(df)} lignes propres)")
 
     except ConnectionError as exc:
         logger.error(f"\n❌  {exc}")
@@ -135,6 +140,8 @@ def main() -> None:
     # ─── Fichier combiné — nom fixe lu par le front ───────────────────────────
     if all_dfs:
         df_all = pd.concat(all_dfs, ignore_index=True)
+        df_all = _clean(df_all, logger, "all")  # dédup cross-sites
+
         combined_path = output_dir / "scraping_all.csv"       # nom FIXE
         df_all.to_csv(combined_path, index=False, encoding="utf-8-sig")
 
@@ -142,7 +149,7 @@ def main() -> None:
         logger.info("  RÉSUMÉ FINAL")
         logger.info(f"{'=' * 60}")
         logger.info(f"  Scraping effectué le : {scraped_at}")
-        logger.info(f"  Total annonces       : {len(df_all)}")
+        logger.info(f"  Total annonces nettes : {len(df_all)}")
         for source in df_all["source"].unique():
             n = len(df_all[df_all["source"] == source])
             prix_med = df_all.loc[df_all["source"] == source, "prix"].median()
@@ -151,6 +158,43 @@ def main() -> None:
         logger.info(f"{'=' * 60}\n")
     else:
         logger.warning("Aucune annonce récupérée. Vérifiez FlareSolverr et les URLs.")
+
+
+# ─── Nettoyage post-scraping ──────────────────────────────────────────────────
+
+def _clean(df: pd.DataFrame, logger, label: str) -> pd.DataFrame:
+    """
+    Nettoie un DataFrame d'annonces :
+      1. Supprime les doublons par URL (SeLoger répète les annonces premium)
+      2. Filtre les prix > PRIX_MAX (certains sites ignorent le filtre URL)
+      3. Supprime les lignes sans prix ET sans surface (données inutilisables)
+    """
+    n_avant = len(df)
+
+    # 1. Dédoublonnage sur l'URL (garde la première occurrence)
+    if "url" in df.columns:
+        df = df.drop_duplicates(subset=["url"], keep="first")
+        n_dup = n_avant - len(df)
+        if n_dup:
+            logger.info(f"[{label.upper()}] {n_dup} doublons supprimés (même URL)")
+
+    # 2. Filtre prix > 500 000 €
+    if "prix" in df.columns:
+        masque_prix = df["prix"].isna() | (df["prix"] <= PRIX_MAX)
+        n_hors_budget = (~masque_prix).sum()
+        df = df[masque_prix]
+        if n_hors_budget:
+            logger.info(f"[{label.upper()}] {n_hors_budget} annonces > {PRIX_MAX:,} € supprimées")
+
+    # 3. Supprime les lignes sans prix ET sans surface (données vides)
+    if "prix" in df.columns and "surface" in df.columns:
+        masque_vide = df["prix"].isna() & df["surface"].isna()
+        n_vide = masque_vide.sum()
+        df = df[~masque_vide]
+        if n_vide:
+            logger.info(f"[{label.upper()}] {n_vide} lignes sans prix ni surface supprimées")
+
+    return df.reset_index(drop=True)
 
 
 def _parse_args() -> argparse.Namespace:

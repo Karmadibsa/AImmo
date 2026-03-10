@@ -1,0 +1,91 @@
+name: "🔄 Scraping immobilier — Toulon"
+
+# ─── Déclencheurs ──────────────────────────────────────────────────────────────
+on:
+  schedule:
+    - cron: "0 * * * *"   # toutes les heures (minute 0 de chaque heure)
+  workflow_dispatch:        # déclenchement manuel depuis l'onglet Actions
+
+# ─── Permissions ───────────────────────────────────────────────────────────────
+permissions:
+  contents: write           # nécessaire pour git push
+
+# ─── Job ───────────────────────────────────────────────────────────────────────
+jobs:
+  scrape:
+    name: "Scraping + commit annonces.csv"
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # ── FlareSolverr en service Docker ───────────────────────────────────────
+    services:
+      flaresolverr:
+        image: ghcr.io/flaresolverr/flaresolverr:latest
+        ports:
+          - 8191:8191
+        env:
+          LOG_LEVEL: warn
+          TZ: Europe/Paris
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: "📥 Checkout"
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 2. Python ───────────────────────────────────────────────────────────
+      - name: "🐍 Setup Python 3.11"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Dépendances (uniquement ce dont le scraper a besoin) ─────────────
+      - name: "📦 Installer les dépendances scraping"
+        run: |
+          pip install --upgrade pip
+          pip install pandas requests beautifulsoup4 lxml
+
+      # ── 4. Attendre que FlareSolverr soit prêt ──────────────────────────────
+      - name: "⏳ Attendre FlareSolverr (max 60s)"
+        run: |
+          echo "En attente de FlareSolverr sur http://localhost:8191..."
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8191 > /dev/null 2>&1; then
+              echo "✅ FlareSolverr prêt !"
+              break
+            fi
+            echo "  tentative $i/20, attente 3s..."
+            sleep 3
+          done
+          # Vérification finale
+          curl -sf http://localhost:8191 || (echo "❌ FlareSolverr inaccessible" && exit 1)
+
+      # ── 5. Scraping ─────────────────────────────────────────────────────────
+      - name: "🕷️ Lancer le scraping (PAP + SeLoger + LeBoncoin)"
+        run: python -m scraping.run_scraping --flaresolverr http://localhost:8191
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+
+      # ── 6. Commit + push si le CSV a changé ─────────────────────────────────
+      - name: "💾 Commit annonces.csv"
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add data/annonces.csv
+
+          if git diff --staged --quiet; then
+            echo "ℹ️  Aucune modification dans annonces.csv — pas de commit."
+          else
+            # Compte le nombre d'annonces pour le message de commit
+            N=$(python -c "
+          import pandas as pd
+          df = pd.read_csv('data/annonces.csv', encoding='utf-8-sig')
+          print(len(df))
+          ")
+            git commit -m "chore(data): ${N} annonces mises à jour [skip ci]"
+            git push
+            echo "✅ annonces.csv commité ($N annonces)."
+          fi

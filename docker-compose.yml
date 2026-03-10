@@ -2,6 +2,20 @@ version: "3.9"
 
 services:
 
+  # ─── FlareSolverr ───────────────────────────────────────────────────────────
+  # Proxy headless Chrome pour bypasser Cloudflare (scraping leboncoin, seloger)
+  # Docs : https://github.com/FlareSolverr/FlareSolverr
+  # API disponible sur http://localhost:8191
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    ports:
+      - "8191:8191"
+    environment:
+      - LOG_LEVEL=info
+      - TZ=Europe/Paris
+    restart: unless-stopped
+
   ollama:
     image: ollama/ollama:latest
     container_name: nidbot_ollama

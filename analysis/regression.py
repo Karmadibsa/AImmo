@@ -6,7 +6,9 @@ IMPORTANT : N'importez pas pour ces fonctions.
 """
 
 # from analysis.stats import mean, variance, covariance, correlation
-from stats import mean, variance, covariance, correlation
+from analysis.stats import mean, variance, covariance, correlation
+
+
 
 
 def predict(alpha: float, beta: float, x_i: float) -> float:

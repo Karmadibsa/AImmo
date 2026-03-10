@@ -5,8 +5,8 @@ Entraîne un modèle Prix = alpha + beta × Surface sur les données DVF.
 
 import pandas as pd
 import math
-from stats import mean
-from regression import predict, sum_of_sqerrors, least_squares_fit, r_squared
+from analysis.stats import mean
+from analysis.regression import predict, sum_of_sqerrors, least_squares_fit, r_squared
 
 # # ═══════════════════════════════════════════════════════════════
 # # 1. CHARGEMENT DES DONNÉES

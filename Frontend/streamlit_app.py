@@ -52,16 +52,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── Chargement du CSV ───────────────────────────────────────────────────────────
-# Chemin relatif depuis ce fichier → repo_root/data/annonces.csv
+# Source primaire : GitHub raw (toujours à jour même sans redéploiement Streamlit)
+# Source secondaire : fichier local (fallback dev)
+GITHUB_RAW_URL = (
+    "https://raw.githubusercontent.com/Karmadibsa/AImmo/"
+    "feat/axel-verification/data/annonces.csv"
+)
 CSV_PATH = Path(__file__).parent.parent / "data" / "annonces.csv"
 
 
-@st.cache_data(ttl=300)    # Cache 5min — se rafraîchit avec le workflow GitHub Actions
+@st.cache_data(ttl=300)    # Cache 5min — relit depuis GitHub à chaque expiration
 def load_data() -> pd.DataFrame:
-    if not CSV_PATH.exists():
-        return pd.DataFrame()
-
-    df = pd.read_csv(CSV_PATH, encoding="utf-8-sig")
+    # 1. Essaie de lire depuis GitHub raw (données toujours fraîches)
+    try:
+        df = pd.read_csv(GITHUB_RAW_URL, encoding="utf-8-sig")
+    except Exception:
+        # 2. Fallback : fichier local (développement ou GitHub indisponible)
+        if not CSV_PATH.exists():
+            return pd.DataFrame()
+        df = pd.read_csv(CSV_PATH, encoding="utf-8-sig")
 
     # Conversion des types numériques
     for col in ["valeur_fonciere", "surface_reelle_bati", "nombre_pieces_principales"]:

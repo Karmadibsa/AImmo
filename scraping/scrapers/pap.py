@@ -61,7 +61,11 @@ class PapScraper(BaseScraper):
         soup = BeautifulSoup(html, "lxml")
         results = []
 
+        found_types: list[str] = []
+        n_tags = 0
+
         for tag in soup.find_all("script", type="application/ld+json"):
+            n_tags += 1
             try:
                 data = json.loads(tag.string or "")
             except (json.JSONDecodeError, AttributeError):
@@ -69,6 +73,7 @@ class PapScraper(BaseScraper):
 
             # Cas 1 : ItemList (page de résultats)
             if isinstance(data, dict) and data.get("@type") == "ItemList":
+                found_types.append("ItemList")
                 for elem in data.get("itemListElement", []):
                     item = elem.get("item", elem)
                     listing = self._normalize_jsonld(item)
@@ -80,15 +85,33 @@ class PapScraper(BaseScraper):
             # Cas 2 : Liste directe d'annonces
             items = data if isinstance(data, list) else [data]
             for item in items:
-                if item.get("@type") in (
+                t = item.get("@type", "")
+                if t:
+                    found_types.append(t)
+                if t in (
                     "RealEstateListing",
                     "Apartment",
                     "House",
                     "Product",
+                    # Types supplémentaires parfois utilisés par PAP
+                    "Residence",
+                    "LodgingBusiness",
                 ):
                     listing = self._normalize_jsonld(item)
                     if listing.get("titre") or listing.get("prix"):
                         results.append(listing)
+
+        # Diagnostic si rien n'a été extrait
+        if not results:
+            if n_tags == 0:
+                logger.warning("[PAP] Aucun bloc JSON-LD trouvé dans la page (structure HTML changée ?)")
+            elif found_types:
+                logger.warning(
+                    f"[PAP] JSON-LD présent mais aucune annonce extraite. "
+                    f"Types @type rencontrés : {list(set(found_types))}"
+                )
+            else:
+                logger.warning(f"[PAP] {n_tags} bloc(s) JSON-LD trouvé(s) mais sans @type reconnu")
 
         return results
 
@@ -164,10 +187,21 @@ class PapScraper(BaseScraper):
             or soup.select("[class*='result-item']")
             or soup.select("article[data-id]")
             or soup.select("li[data-id]")
+            # Sélecteurs pour les versions récentes de PAP (React/Next.js)
+            or soup.select("article[class*='card']")
+            or soup.select("[class*='Card']")
+            or soup.select("[data-testid*='ad']")
+            or soup.select("[data-testid*='listing']")
+            or soup.select("[data-testid*='result']")
         )
 
         if not containers:
-            logger.debug("[PAP] Aucun container trouvé dans le HTML")
+            # Diagnostic : affiche un extrait du HTML pour aider
+            page_title = soup.find("title")
+            logger.warning(
+                f"[PAP] Aucun container trouvé. "
+                f"Titre de la page : {page_title.get_text() if page_title else 'inconnu'}"
+            )
 
         for container in containers:
             try:

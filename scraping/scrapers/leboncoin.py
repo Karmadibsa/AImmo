@@ -62,18 +62,36 @@ class LeboncoinScraper(BaseScraper):
             logger.debug(f"[LEBONCOIN] Erreur JSON __NEXT_DATA__: {e}")
             return []
 
-        # Plusieurs chemins possibles selon la version du site
+        page_props = self._deep_get(data, "props", "pageProps") or {}
+
+        # Plusieurs chemins possibles selon la version du site (ordre de priorité)
         ads = (
-            self._deep_get(data, "props", "pageProps", "searchData", "ads")
-            or self._deep_get(data, "props", "pageProps", "ads")
-            or self._deep_get(data, "props", "pageProps", "initialSearchData", "ads")
-            or self._deep_get(data, "props", "pageProps", "data", "ads")
-            or self._deep_get(data, "props", "pageProps", "searchResults", "ads")
+            self._deep_get(page_props, "searchData", "ads")
+            or self._deep_get(page_props, "ads")
+            or self._deep_get(page_props, "initialSearchData", "ads")
+            or self._deep_get(page_props, "data", "ads")
+            or self._deep_get(page_props, "searchResults", "ads")
+            # Chemins ajoutés pour les versions récentes de LeBoncoin
+            or self._deep_get(page_props, "initialReduxState", "listing", "listings")
+            or self._deep_get(page_props, "initialState", "listing", "ads")
+            or self._deep_get(page_props, "listingData", "ads")
+            or self._deep_get(page_props, "searchProps", "ads")
+            or self._deep_get(page_props, "initialData", "ads")
         )
 
         if not ads or not isinstance(ads, list):
-            logger.debug("[LEBONCOIN] Chemin ads non trouvé dans __NEXT_DATA__")
-            return []
+            # Affiche les clés disponibles pour aider au diagnostic
+            page_props_keys = sorted(page_props.keys()) if page_props else []
+            logger.warning(
+                "[LEBONCOIN] Chemin 'ads' introuvable dans __NEXT_DATA__. "
+                f"Clés de pageProps disponibles : {page_props_keys}"
+            )
+            # Dernière tentative : recherche récursive de la première grande liste de dicts
+            ads = self._find_ads_list(data)
+            if ads:
+                logger.info(f"[LEBONCOIN] Recherche récursive → {len(ads)} annonces candidates")
+            else:
+                return []
 
         return [self._normalize_ad(ad) for ad in ads if isinstance(ad, dict)]
 
@@ -230,3 +248,35 @@ class LeboncoinScraper(BaseScraper):
                 return None
             obj = obj.get(key)
         return obj
+
+    @staticmethod
+    def _find_ads_list(data: dict, min_items: int = 5, max_depth: int = 6) -> list:
+        """
+        Recherche récursive dans __NEXT_DATA__ la première liste qui ressemble
+        à une liste d'annonces (≥ min_items dicts avec une clé 'price' ou 'subject').
+        Utilisé en dernier recours quand aucun chemin connu ne fonctionne.
+        """
+        def _search(obj, depth):
+            if depth > max_depth:
+                return None
+            if isinstance(obj, list) and len(obj) >= min_items:
+                # Vérifie que c'est une liste d'annonces (au moins 60% ont price ou subject)
+                ad_like = sum(
+                    1 for x in obj
+                    if isinstance(x, dict) and ("price" in x or "subject" in x or "list_id" in x)
+                )
+                if ad_like / len(obj) >= 0.6:
+                    return obj
+            if isinstance(obj, dict):
+                for val in obj.values():
+                    result = _search(val, depth + 1)
+                    if result is not None:
+                        return result
+            if isinstance(obj, list):
+                for item in obj:
+                    result = _search(item, depth + 1)
+                    if result is not None:
+                        return result
+            return None
+
+        return _search(data, 0) or []

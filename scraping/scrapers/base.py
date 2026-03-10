@@ -15,6 +15,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
@@ -66,13 +67,20 @@ class BaseScraper(ABC):
 
     # ─── Interface publique ───────────────────────────────────────────────────
 
-    def scrape(self, start_url: str, max_pages: int = 5) -> list[dict]:
+    def scrape(
+        self,
+        start_url: str,
+        max_pages: int = 5,
+        html_dump_dir: Optional[str] = None,
+    ) -> list[dict]:
         """
         Scrape jusqu'à `max_pages` pages depuis `start_url`.
 
         Args:
-            start_url : URL de la première page de résultats
-            max_pages : Nombre maximum de pages à parcourir
+            start_url    : URL de la première page de résultats
+            max_pages    : Nombre maximum de pages à parcourir
+            html_dump_dir: Si fourni, sauvegarde le HTML brut de chaque page dans ce dossier
+                           (utile pour déboguer quand un site change de structure)
 
         Returns:
             Liste de listings normalisés (voir LISTING_SCHEMA)
@@ -80,6 +88,10 @@ class BaseScraper(ABC):
         self.results = []
         url: Optional[str] = start_url
         scraped_at = datetime.now().isoformat()
+
+        if html_dump_dir:
+            Path(html_dump_dir).mkdir(parents=True, exist_ok=True)
+            logger.info(f"[{self.SOURCE.upper()}] Mode debug : HTML sauvegardé dans '{html_dump_dir}/'")
 
         for page in range(1, max_pages + 1):
             if not url:
@@ -89,6 +101,13 @@ class BaseScraper(ABC):
 
             try:
                 html = self.client.get(url)
+
+                # ── Sauvegarde HTML pour debug ─────────────────────────────
+                if html_dump_dir:
+                    dump_path = Path(html_dump_dir) / f"{self.SOURCE}_page{page:02d}.html"
+                    dump_path.write_text(html, encoding="utf-8", errors="replace")
+                    logger.info(f"[{self.SOURCE.upper()}] HTML page {page} → {dump_path}")
+
                 items = self._parse_page(html)
 
                 if not items:

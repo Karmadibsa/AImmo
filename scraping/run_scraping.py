@@ -113,7 +113,7 @@ def main() -> None:
                 scraper = SCRAPERS[site](client)
                 url = SEARCH_URLS[site]
 
-                results = scraper.scrape(url, max_pages=args.max_pages)
+                results = scraper.scrape(url, max_pages=args.max_pages, html_dump_dir=args.save_html)
                 df = scraper.to_dataframe()
 
                 # ── Nettoyage par site ─────────────────────────────────────
@@ -220,6 +220,16 @@ def _parse_args() -> argparse.Namespace:
         default=str(OUTPUT_DIR),
         metavar="DIR",
         help=f"Dossier de sortie (défaut: {OUTPUT_DIR})",
+    )
+    parser.add_argument(
+        "--save-html",
+        default=None,
+        metavar="DIR",
+        help=(
+            "Sauvegarde le HTML brut de chaque page dans DIR (ex: debug_html/). "
+            "Utile pour déboguer quand un site change de structure. "
+            "Exemple : --save-html debug_html"
+        ),
     )
     return parser.parse_args()
 

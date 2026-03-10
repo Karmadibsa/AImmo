@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Schéma standardisé partagé entre tous les scrapers
 LISTING_SCHEMA = [
     "source",
+    "type_bien",
     "titre",
     "prix",
     "surface",
@@ -214,3 +215,23 @@ class BaseScraper(ABC):
             return int(digits) if digits else None
         except ValueError:
             return None
+
+    @staticmethod
+    def _normalize_type_bien(raw: str) -> Optional[str]:
+        """
+        Normalise le type de bien en "Appartement" ou "Maison".
+
+        Accepte les variantes FR/EN et les abréviations courantes :
+          - "apartment", "flat", "studio", "loft", "duplex" → "Appartement"
+          - "house", "villa", "pavillon", "maison"          → "Maison"
+
+        Returns None si le type ne peut pas être déterminé.
+        """
+        if not raw:
+            return None
+        s = str(raw).lower().strip()
+        if any(kw in s for kw in ("appartement", "apartment", "flat", "studio", "loft", "duplex")):
+            return "Appartement"
+        if any(kw in s for kw in ("maison", "house", "villa", "pavillon")):
+            return "Maison"
+        return None

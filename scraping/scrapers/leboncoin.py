@@ -93,6 +93,7 @@ class LeboncoinScraper(BaseScraper):
         # ── Attributs (surface, pièces, type de bien) ─────────────────────────
         surface = None
         nb_pieces = None
+        type_bien = None
         for attr in ad.get("attributes", []):
             key = attr.get("key", "")
             val = attr.get("value") or attr.get("value_label", "")
@@ -100,6 +101,9 @@ class LeboncoinScraper(BaseScraper):
                 surface = self._to_float(val)
             elif key == "rooms":
                 nb_pieces = self._to_int(val)
+            elif key == "real_estate_type":
+                # value_label contient "Appartement" ou "Maison"
+                type_bien = self._normalize_type_bien(attr.get("value_label") or val)
 
         # ── Localisation ──────────────────────────────────────────────────────
         loc = ad.get("location", {}) or {}
@@ -111,8 +115,15 @@ class LeboncoinScraper(BaseScraper):
         raw_url = ad.get("url", "") or ""
         url = raw_url if raw_url.startswith("http") else f"{BASE_URL}{raw_url}"
 
+        # Fallback : déduire le type depuis la catégorie ou le titre
+        if not type_bien:
+            type_bien = self._normalize_type_bien(
+                ad.get("category_name", "") or str(ad.get("subject", ""))
+            )
+
         return {
             "source": self.SOURCE,
+            "type_bien": type_bien,
             "titre": str(ad.get("subject", "")).strip(),
             "prix": prix,
             "surface": surface,
@@ -180,6 +191,7 @@ class LeboncoinScraper(BaseScraper):
                 results.append(
                     {
                         "source": self.SOURCE,
+                        "type_bien": self._normalize_type_bien(titre),
                         "titre": titre,
                         "prix": prix,
                         "surface": surface,

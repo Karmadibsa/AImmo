@@ -127,8 +127,13 @@ class PapScraper(BaseScraper):
         if url and not url.startswith("http"):
             url = BASE_URL + url
 
+        # Type de bien : @type JSON-LD ("Apartment"/"House") ou depuis le titre/URL
+        raw_type = item.get("@type", "") or item.get("name", "") or url
+        type_bien = self._normalize_type_bien(raw_type)
+
         return {
             "source": self.SOURCE,
+            "type_bien": type_bien,
             "titre": str(item.get("name", "")).strip(),
             "prix": prix,
             "surface": surface,
@@ -240,8 +245,12 @@ class PapScraper(BaseScraper):
         desc_el = el.find(class_=re.compile(r"desc|summary|body|text|content", re.I))
         description = desc_el.get_text(strip=True) if desc_el else ""
 
+        # Type de bien : depuis le titre ou l'URL (PAP met "appartement"/"maison" dedans)
+        type_bien = self._normalize_type_bien(titre) or self._normalize_type_bien(url)
+
         return {
             "source": self.SOURCE,
+            "type_bien": type_bien,
             "titre": titre,
             "prix": prix,
             "surface": surface,

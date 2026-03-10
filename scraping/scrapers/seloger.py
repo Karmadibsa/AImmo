@@ -142,6 +142,17 @@ class SeLogerScraper(BaseScraper):
         if url and not url.startswith("http"):
             url = BASE_URL + url
 
+        # ── Type de bien ──────────────────────────────────────────────────────
+        raw_type = (
+            ad.get("propertyType")
+            or ad.get("estateType")
+            or ad.get("estateTypeLabel")
+            or ad.get("typeLabel")
+            or (ad.get("listingDetail") or {}).get("propertyType")
+            or ""
+        )
+        type_bien = self._normalize_type_bien(str(raw_type))
+
         # ── Titre ─────────────────────────────────────────────────────────────
         titre = str(
             ad.get("title") or ad.get("name") or ad.get("label") or ""
@@ -149,13 +160,17 @@ class SeLogerScraper(BaseScraper):
 
         # Si pas de titre, on le construit à partir du type de bien
         if not titre:
-            type_bien = ad.get("propertyType") or ad.get("estateType") or ""
             pieces_str = f"{nb_pieces} pièces" if nb_pieces else ""
             surface_str = f"{int(surface)}m²" if surface else ""
-            titre = " – ".join(filter(None, [type_bien, pieces_str, surface_str]))
+            titre = " – ".join(filter(None, [type_bien or raw_type, pieces_str, surface_str]))
+
+        # Fallback type_bien depuis le titre si non trouvé
+        if not type_bien:
+            type_bien = self._normalize_type_bien(titre)
 
         return {
             "source": self.SOURCE,
+            "type_bien": type_bien,
             "titre": titre,
             "prix": prix,
             "surface": surface,
@@ -192,10 +207,12 @@ class SeLogerScraper(BaseScraper):
                     if url and not url.startswith("http"):
                         url = BASE_URL + url
 
+                    titre_jsonld = str(item.get("name", "")).strip()
                     results.append(
                         {
                             "source": self.SOURCE,
-                            "titre": str(item.get("name", "")).strip(),
+                            "type_bien": self._normalize_type_bien(t) or self._normalize_type_bien(titre_jsonld),
+                            "titre": titre_jsonld,
                             "prix": self._to_float(
                                 (offers or {}).get("price") if isinstance(offers, dict) else offers
                             ),
@@ -293,6 +310,7 @@ class SeLogerScraper(BaseScraper):
                     results.append(
                         {
                             "source": self.SOURCE,
+                            "type_bien": self._normalize_type_bien(titre),
                             "titre": titre,
                             "prix": prix,
                             "surface": surface,

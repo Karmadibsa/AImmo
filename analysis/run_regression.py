@@ -8,6 +8,23 @@ import math
 from stats import mean
 from regression import predict, sum_of_sqerrors, least_squares_fit, r_squared
 
+# # ═══════════════════════════════════════════════════════════════
+# # 1. CHARGEMENT DES DONNÉES
+# # ═══════════════════════════════════════════════════════════════
+
+# print("=" * 70)
+# print("RÉGRESSION LINÉAIRE : Prix = alpha + beta × Surface")
+# print("=" * 70)
+# print("\n📁 Chargement des données...")
+
+# df = pd.read_csv("donnees/dvf-nettoyer_800_day.csv")
+
+# # Conversion en listes Python
+# prix_bruts = df['valeur_fonciere'].tolist()
+# surfaces_brutes = df['surface_reelle_bati'].tolist()
+
+# print(f"   ✅ {len(prix_bruts)} transactions chargées")
+
 # ═══════════════════════════════════════════════════════════════
 # 1. CHARGEMENT DES DONNÉES
 # ═══════════════════════════════════════════════════════════════
@@ -19,11 +36,47 @@ print("\n📁 Chargement des données...")
 
 df = pd.read_csv("donnees/dvf-nettoyer_800_day.csv")
 
+print(f"   ✅ {len(df)} transactions chargées")
+
+# ═══════════════════════════════════════════════════════════════
+# 1.5 FILTRAGE PAR TYPE
+# ═══════════════════════════════════════════════════════════════
+
+print("\n🏠 Filtrage par type de bien...")
+
+print(f"   Répartition avant filtrage :")
+print(f"      • Appartements : {len(df[df['type_local'] == 'Appartement'])}")
+print(f"      • Maisons      : {len(df[df['type_local'] == 'Maison'])}")
+
+# GARDER SEULEMENT LES APPARTEMENTS
+df = df[df['type_local'] == 'Appartement']
+
+print(f"\n   ✅ {len(df)} appartements conservés pour l'analyse")
+print(f"   ℹ️  Focus : Primo-accédants (typiquement acheteurs d'appartements)")
+
+# ═══════════════════════════════════════════════════════════════
+# 1.6 FILTRAGE PAR PRIX/M²
+# ═══════════════════════════════════════════════════════════════
+
+print("\n💰 Filtrage par prix/m²...")
+
+# Calculer prix/m²
+df['prix_m2'] = df['valeur_fonciere'] / df['surface_reelle_bati']
+
+print(f"   Avant : {len(df)} appartements")
+
+# Garder seulement prix/m² raisonnables (ni trop bas, ni trop haut)
+df = df[(df['prix_m2'] >= 3500) & (df['prix_m2'] <= 10000)]
+
+print(f"   Après : {len(df)} appartements (filtrés 3500-10000€/m²)")
+
 # Conversion en listes Python
 prix_bruts = df['valeur_fonciere'].tolist()
 surfaces_brutes = df['surface_reelle_bati'].tolist()
 
-print(f"   ✅ {len(prix_bruts)} transactions chargées")
+# Conversion en listes Python
+prix_bruts = df['valeur_fonciere'].tolist()
+surfaces_brutes = df['surface_reelle_bati'].tolist()
 
 # ═══════════════════════════════════════════════════════════════
 # 2. NETTOYAGE DES DONNÉES

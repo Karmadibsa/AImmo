@@ -212,10 +212,11 @@ def load_data() -> pd.DataFrame:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
     mask = df["surface_reelle_bati"].fillna(0) > 0
-    df["prix_m2"] = None
+    df["prix_m2"] = float("nan")
     df.loc[mask, "prix_m2"] = (
         df.loc[mask, "valeur_fonciere"] / df.loc[mask, "surface_reelle_bati"]
     ).round(0)
+    df["prix_m2"] = pd.to_numeric(df["prix_m2"], errors="coerce")
 
     if "date_mutation" in df.columns:
         df["date_mutation"] = pd.to_datetime(df["date_mutation"], errors="coerce")
@@ -362,9 +363,11 @@ with tab_analyse:
         st.markdown("#### 🔵 Prix en fonction de la surface")
         df_sc = df.dropna(subset=["valeur_fonciere", "surface_reelle_bati"])
         if not df_sc.empty:
+            # Convertir en liste Python pour éviter le bug narwhals/Plotly (Python 3.14)
+            size_vals = df_sc["prix_m2"].fillna(0).astype(float).tolist()
             fig2 = px.scatter(
                 df_sc, x="surface_reelle_bati", y="valeur_fonciere",
-                color="type_local", size="prix_m2",
+                color="type_local", size=size_vals,
                 color_discrete_map={"Appartement": "#E8714A", "Maison": "#1B2B4B"},
                 hover_name="titre",
                 hover_data={"nombre_pieces_principales": True, "source": True,

@@ -24,40 +24,80 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+html, body, [class*="css"] { font-family: 'Inter', sans-serif; color: #1E293B; }
 
 /* ─── Fond général ─── */
 .stApp { background: #F4F6FA; }
 
-/* ─── Sidebar ─── */
-[data-testid="stSidebar"] {
-    background: #1B2B4B !important;
-}
+/* ══════════════════════════════════════════════════════════════════
+   ZONE PRINCIPALE — couleur de texte par défaut (anti blanc-sur-blanc)
+══════════════════════════════════════════════════════════════════ */
+.main p, .main span:not([data-baseweb="tag"] span),
+.main label, .main small,
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stMarkdownContainer"] li,
+[data-testid="stMarkdownContainer"] span { color: #1E293B !important; }
+
+/* Inputs, textareas, selects zone principale */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-baseweb="input"] input,
+[data-baseweb="textarea"] textarea { color: #1E293B !important; background: white !important; }
+
+/* Selectbox zone principale */
+[data-testid="stSelectbox"] [data-baseweb="select"] > div,
+[data-testid="stSelectbox"] [data-baseweb="select"] [data-baseweb="value"],
+[data-testid="stSelectbox"] [data-baseweb="select"] input { color: #1E293B !important; background: white !important; }
+
+/* Multiselect zone principale */
+[data-testid="stMultiSelect"] [data-baseweb="select"] > div,
+[data-testid="stMultiSelect"] input { color: #1E293B !important; background: white !important; }
+[data-testid="stMultiSelect"] [data-baseweb="tag"] span { color: #1E293B !important; }
+
+/* Radio boutons */
+[data-testid="stRadio"] label, [data-testid="stRadio"] p { color: #1E293B !important; }
+
+/* Expander */
+[data-testid="stExpander"] summary p,
+[data-testid="stExpander"] summary span { color: #1E293B !important; }
+
+/* Texte dans les dataframes */
+[data-testid="stDataFrame"] * { color: #1E293B; }
+
+/* ══════════════════════════════════════════════════════════════════
+   SIDEBAR — fond sombre, texte clair
+══════════════════════════════════════════════════════════════════ */
+[data-testid="stSidebar"] { background: #1B2B4B !important; }
+
+/* Texte courant sidebar — SANS div (trop large) */
 [data-testid="stSidebar"] p,
-[data-testid="stSidebar"] span,
 [data-testid="stSidebar"] label,
-[data-testid="stSidebar"] div,
-[data-testid="stSidebar"] small {
-    color: #CBD5E1 !important;
-}
+[data-testid="stSidebar"] small,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] span,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p { color: #CBD5E1 !important; }
+
+/* Titres sidebar */
 [data-testid="stSidebar"] h1,
 [data-testid="stSidebar"] h2,
-[data-testid="stSidebar"] h3 {
-    color: #E8714A !important;
-}
-[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
-    color: #CBD5E1 !important;
-}
-/* Inputs sidebar */
-[data-testid="stSidebar"] input,
-[data-testid="stSidebar"] .stSelectbox > div > div {
-    background: #253859 !important;
-    color: white !important;
-    border-color: #3A5278 !important;
-}
-[data-testid="stSidebar"] .stSlider [data-testid="stTickBar"] {
-    color: #CBD5E1 !important;
-}
+[data-testid="stSidebar"] h3 { color: #E8714A !important; }
+
+/* Inputs sidebar — fond bleu foncé + texte clair */
+[data-testid="stSidebar"] input { background: #253859 !important; color: #E2E8F0 !important; border-color: #3A5278 !important; }
+
+/* Selectbox sidebar */
+[data-testid="stSidebar"] [data-baseweb="select"] > div { background: #253859 !important; border-color: #3A5278 !important; }
+[data-testid="stSidebar"] [data-baseweb="select"] [data-baseweb="value"],
+[data-testid="stSidebar"] [data-baseweb="select"] input { color: #E2E8F0 !important; }
+[data-testid="stSidebar"] [data-baseweb="select"] [data-baseweb="placeholder"] { color: #94A3B8 !important; }
+
+/* Multiselect sidebar — tags */
+[data-testid="stSidebar"] [data-baseweb="tag"] { background: #3A5278 !important; }
+[data-testid="stSidebar"] [data-baseweb="tag"] span { color: #E2E8F0 !important; }
+
+/* Slider sidebar */
+[data-testid="stSidebar"] [data-testid="stTickBarMin"],
+[data-testid="stSidebar"] [data-testid="stTickBarMax"] { color: #94A3B8 !important; }
 
 /* ─── Header ─── */
 .aimmo-header {
@@ -67,28 +107,9 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     margin-bottom: 28px;
     box-shadow: 0 6px 24px rgba(27,43,75,0.25);
 }
-.aimmo-header h1 {
-    color: white;
-    margin: 0 0 6px 0;
-    font-size: 26px;
-    font-weight: 700;
-    letter-spacing: -0.3px;
-}
-.aimmo-header .subtitle {
-    color: #93B4D4;
-    font-size: 13px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
-}
-.aimmo-header .badge {
-    background: rgba(255,255,255,0.12);
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 12px;
-    color: #BDD4EC;
-}
+.aimmo-header h1 { color: white; margin: 0 0 6px 0; font-size: 26px; font-weight: 700; letter-spacing: -0.3px; }
+.aimmo-header .subtitle { color: #93B4D4; font-size: 13px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.aimmo-header .badge { background: rgba(255,255,255,0.12); padding: 3px 10px; border-radius: 20px; font-size: 12px; color: #BDD4EC; }
 
 /* ─── Métriques ─── */
 [data-testid="metric-container"] {
@@ -100,40 +121,43 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 }
 [data-testid="stMetricLabel"]  { color: #64748B !important; font-size: 13px !important; }
 [data-testid="stMetricValue"]  { color: #1B2B4B !important; font-weight: 700 !important; }
+[data-testid="stMetricDelta"]  { color: #64748B !important; }
 
-/* ─── Onglets ─── */
+/* ══════════════════════════════════════════════════════════════════
+   ONGLETS — 4 boutons pleine largeur + égaux
+══════════════════════════════════════════════════════════════════ */
 [data-baseweb="tab-list"] {
-    gap: 4px;
+    display: flex !important;
+    gap: 6px;
     background: white;
-    padding: 6px 8px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    margin-bottom: 20px;
+    padding: 8px 10px;
+    border-radius: 14px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    margin-bottom: 28px;
 }
 [data-baseweb="tab"] {
-    border-radius: 8px !important;
-    font-weight: 500 !important;
+    flex: 1 !important;
+    justify-content: center !important;
+    text-align: center !important;
+    border-radius: 10px !important;
+    font-weight: 600 !important;
+    font-size: 14px !important;
     color: #64748B !important;
+    padding: 10px 6px !important;
+    transition: background 0.15s, color 0.15s !important;
 }
 [aria-selected="true"][data-baseweb="tab"] {
     background: #1B2B4B !important;
     color: white !important;
+    box-shadow: 0 2px 8px rgba(27,43,75,0.3) !important;
 }
 
-/* ─── Contenu onglets — padding interne ─── */
-[data-baseweb="tab-panel"] > div:first-child {
-    padding: 20px 12px 12px 12px !important;
-}
+/* ─── Contenu onglets — padding généreux ─── */
+[data-baseweb="tab-panel"] { padding-top: 4px !important; }
+[data-baseweb="tab-panel"] > div:first-child { padding: 20px 8px 16px 8px !important; }
 
 /* ─── Tags NLP ─── */
-.tag {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 600;
-    margin: 2px 2px 2px 0;
-}
+.tag { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; margin: 2px 2px 2px 0; }
 .tag-blue   { background: #DBEAFE; color: #1D4ED8; }
 .tag-green  { background: #DCFCE7; color: #16A34A; }
 .tag-orange { background: #FEF3C7; color: #D97706; }
@@ -148,71 +172,39 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 /* ─── Assistant conversationnel ─── */
 .chat-wrap { max-width: 680px; margin: 0 auto; padding: 8px 0; }
 .bot-bubble {
-    background: white;
-    border: 1px solid #E2E8F0;
-    border-radius: 18px 18px 18px 4px;
-    padding: 12px 18px;
-    margin: 6px 0 10px 0;
-    display: inline-block;
-    max-width: 82%;
-    font-size: 14px;
-    color: #1E293B;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-    line-height: 1.5;
+    background: white; border: 1px solid #E2E8F0;
+    border-radius: 18px 18px 18px 4px; padding: 12px 18px;
+    margin: 6px 0 10px 0; display: inline-block; max-width: 82%;
+    font-size: 14px; color: #1E293B !important;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05); line-height: 1.5;
 }
 .user-bubble {
     background: linear-gradient(135deg, #1B2B4B, #2C4A8A);
-    border-radius: 18px 18px 4px 18px;
-    padding: 10px 18px;
-    margin: 6px 0 10px auto;
-    display: block;
-    width: fit-content;
-    margin-left: auto;
-    font-size: 14px;
-    color: white;
-    font-weight: 500;
+    border-radius: 18px 18px 4px 18px; padding: 10px 18px;
+    margin: 6px 0 10px auto; display: block; width: fit-content;
+    margin-left: auto; font-size: 14px; color: white !important; font-weight: 500;
 }
 .result-card {
-    background: white;
-    border-radius: 12px;
-    padding: 14px 18px;
-    margin: 8px 0;
-    border-left: 4px solid #E8714A;
+    background: white; border-radius: 12px; padding: 14px 18px;
+    margin: 8px 0; border-left: 4px solid #E8714A;
     box-shadow: 0 2px 8px rgba(0,0,0,0.06);
 }
+.result-card b, .result-card span { color: #1E293B !important; }
 .result-card.opport  { border-left-color: #16A34A; }
 .result-card.bonne   { border-left-color: #22C55E; }
 .result-card.normal  { border-left-color: #3B82F6; }
 .result-card.eleve   { border-left-color: #F59E0B; }
-.chat-btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 16px 0; }
 
 /* ─── Section card ─── */
 .section-card {
-    background: white;
-    border-radius: 14px;
-    padding: 20px 22px;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-    margin-bottom: 16px;
+    background: white; border-radius: 14px; padding: 22px 24px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.06); margin-bottom: 20px;
 }
+.section-card h4, .section-card p, .section-card span { color: #1E293B; }
 
 /* ─── Prix badge ─── */
-.prix-badge {
-    background: #FFF7ED;
-    border: 1px solid #FED7AA;
-    color: #C2410C;
-    font-weight: 700;
-    padding: 4px 12px;
-    border-radius: 8px;
-    font-size: 15px;
-}
-.pm2-badge {
-    background: #EFF6FF;
-    border: 1px solid #BFDBFE;
-    color: #1D4ED8;
-    font-size: 12px;
-    padding: 2px 8px;
-    border-radius: 6px;
-}
+.prix-badge { background: #FFF7ED; border: 1px solid #FED7AA; color: #C2410C !important; font-weight: 700; padding: 4px 12px; border-radius: 8px; font-size: 15px; }
+.pm2-badge  { background: #EFF6FF; border: 1px solid #BFDBFE; color: #1D4ED8 !important; font-size: 12px; padding: 2px 8px; border-radius: 6px; }
 
 hr { border: none; border-top: 1px solid #E2E8F0; margin: 16px 0; }
 </style>

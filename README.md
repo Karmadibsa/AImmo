@@ -72,7 +72,7 @@ streamlit run app/streamlit_app.py
 
 ## Déploiement
 
-URL de l'application déployée : [À compléter]
+URL de l'application déployée : https://aimmo-project.streamlit.app/
 
 ## Données et Références
 

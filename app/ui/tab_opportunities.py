@@ -47,13 +47,11 @@ def render_opportunities(
         _sl_app, _sl_mais = DVF_REGRESSION["Appartement"]["slope"], DVF_REGRESSION["Maison"]["slope"]
         st.markdown(f"""
         <div class="section-card" style="border-top:3px solid #8B5CF6;">
-        <strong>📚 Référence DVF historique</strong> — Prix comparé aux
+        <strong>📚 Référence DVF historique</strong> — Prix comparé à
         <strong>{_n_app + _n_mais:,} ventes réelles</strong> enregistrées à Toulon
         (DVF 2023-2025, source DGFiP).<br>
         Modèles : Appartement = <b>{_sl_app:,.0f} €/m²</b> (n={_n_app:,}, R²={_r2_app})
         &nbsp;|&nbsp; Maison = <b>{_sl_mais:,.0f} €/m²</b> (n={_n_mais:,}, R²={_r2_mais})<br>
-        <small style="color:#64748B;">Coefficients fixes — robustes statistiquement, mais ne capturent
-        pas les variations de prix récentes (données ≤ 3 mois).</small>
         </div>
         """, unsafe_allow_html=True)
 
@@ -72,9 +70,6 @@ def render_opportunities(
                    delta=f"{best_row[_col_e]:,.0f} € sous le marché")
     else:
         ko2.metric("🏆 Meilleure affaire", "—")
-    ko3.metric("💰 Économie médiane",
-               f"{abs(econ_med):,.0f} €" if econ_med else "—",
-               delta="par rapport au prix attendu")
 
     # ── Scatter + droite de régression ───────────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)

@@ -5,8 +5,8 @@ Entraîne 2 modèles : un pour les appartements, un pour les maisons.
 
 import pandas as pd
 import math
-from stats import mean, correlation
-from regression import predict, sum_of_sqerrors, least_squares_fit, r_squared
+from analysis.stats import mean, correlation
+from analysis.regression import predict, sum_of_sqerrors, least_squares_fit, r_squared
 
 # ═══════════════════════════════════════════════════════════════
 # FONCTION HELPER : Analyser un type de bien
@@ -140,7 +140,7 @@ print("=" * 70)
 
 # Chargement
 print("\n📁 Chargement des données...")
-df = pd.read_csv("donnees/dvf-nettoyer_800_day.csv")
+df = pd.read_csv("data/dvf_toulon.csv")
 print(f"   ✅ {len(df)} transactions chargées")
 
 # Répartition

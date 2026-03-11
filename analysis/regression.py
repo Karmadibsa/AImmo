@@ -6,7 +6,7 @@ IMPORTANT : N'importez pas pour ces fonctions.
 """
 
 # from analysis.stats import mean, variance, covariance, correlation
-from analysis.stats import mean, variance, covariance, correlation
+from analysis.stats import mean, variance, covariance, correlation, standard_deviation
 
 
 
@@ -36,13 +36,17 @@ def least_squares_fit(x: list[float], y: list[float]) -> tuple[float, float]:
     Retourne (alpha, beta) tels que y ≈ alpha + beta * x.
     """
 
-    # Calcule de beta (pente)
-    beta = covariance(x, y) / variance(x)
-
-    # Calcule d'alpha (ordonnée à l'origine)
+    beta = correlation(x, y) * standard_deviation(y) / standard_deviation(x)
     alpha = mean(y) - beta * mean(x)
-
     return alpha, beta
+
+    # # Calcule de beta (pente)
+    # beta = covariance(x, y) / variance(x)
+
+    # # Calcule d'alpha (ordonnée à l'origine)
+    # alpha = mean(y) - beta * mean(x)
+
+    # return alpha, beta
 
 def r_squared(alpha: float, beta: float, x: list, y: list) -> float:
     """
@@ -50,6 +54,8 @@ def r_squared(alpha: float, beta: float, x: list, y: list) -> float:
     R² = 1 - (SS_res / SS_tot)
     1.0 = ajustement parfait, 0.0 = le modele n'explique rien.
     """
+
+    # return 1.0 - (sum_of_sqerrors(alpha, beta, x, y)/ total_sum_of_squares(y))
 
     # Erreur du modèle
     ss_res = sum_of_sqerrors(alpha, beta, x, y)

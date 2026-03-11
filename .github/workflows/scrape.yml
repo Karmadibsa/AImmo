@@ -3,7 +3,7 @@ name: "🔄 Scraping immobilier — Toulon"
 # ─── Déclencheurs ──────────────────────────────────────────────────────────────
 on:
   schedule:
-    - cron: "0 7,13,19 * * *"   # 3x/jour : 7h, 13h, 19h (heure UTC → 8h/14h/20h Paris)
+    - cron: "0 * * * *"  # S'exécute à la minute 0 de chaque heure
   workflow_dispatch:             # déclenchement manuel depuis l'onglet Actions
                                  # → choisir la branche dans le menu déroulant GitHub
 

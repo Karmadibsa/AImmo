@@ -232,6 +232,20 @@ NLP_TAGS = {
                     "proche mer", "400 mètres"],                        "tag-sea"),
 }
 
+# ── Coefficients DVF Toulon (pré-calculés) ────────────────────────────────────
+# Source : data/dvf_toulon.csv — ventes 2023-2025 (nature_mutation = Vente)
+# Filtre appliqué : surface > 10 m², prix 10 000–500 000 €, Toulon uniquement
+# Appartement : n=3 725, R²=0.141  |  Maison : n=393, R²=0.139
+DVF_REGRESSION: dict[str, dict] = {
+    "Appartement": {"slope": 1_661.0, "intercept":  76_761.0, "r2": 0.141, "n": 3_725},
+    "Maison":      {"slope": 1_685.0, "intercept": 200_407.0, "r2": 0.139, "n":   393},
+}
+
+def extract_tags(description: str) -> list:
+    if not isinstance(description, str):
+        return []
+    d = description.lower()
+    return [(lbl, css) for lbl, (kws, css) in NLP_TAGS.items() if any(k in d for k in kws)]
 
 def extract_tags(description: str) -> list:
     if not isinstance(description, str):
@@ -297,6 +311,44 @@ def compute_regression(df_input: pd.DataFrame) -> pd.DataFrame:
     if not results:
         return pd.DataFrame()
     return pd.concat(results, ignore_index=True)
+
+
+def compute_dvf_scores(df_input: pd.DataFrame) -> pd.DataFrame:
+    """
+    Applique les coefficients DVF pré-calculés (dvf_toulon.csv — 4 118 ventes Toulon)
+    à chaque annonce pour évaluer son écart vs le marché historique.
+
+    Colonnes ajoutées :
+      dvf_prix_predit  : prix attendu selon le modèle DVF
+      dvf_ecart        : prix réel − dvf_prix_predit  (négatif = sous-évalué)
+      dvf_ecart_pct    : écart en % (négatif = bonne affaire)
+      _dvf_slope / _dvf_intercept : coefficients utilisés (pour tracer la droite)
+    """
+    df = df_input.copy()
+    for col in ["dvf_prix_predit", "dvf_ecart", "dvf_ecart_pct",
+                "_dvf_slope", "_dvf_intercept"]:
+        df[col] = float("nan")
+
+    for ttype, coef in DVF_REGRESSION.items():
+        mask = (
+            df["type_local"].eq(ttype)
+            & df["surface_reelle_bati"].notna()
+            & df["valeur_fonciere"].notna()
+            & (df["surface_reelle_bati"] > 10)
+            & (df["valeur_fonciere"] > 10_000)
+        )
+        if not mask.any():
+            continue
+        x = df.loc[mask, "surface_reelle_bati"]
+        y = df.loc[mask, "valeur_fonciere"]
+        predicted = (coef["slope"] * x + coef["intercept"]).round(0)
+        df.loc[mask, "_dvf_slope"]      = coef["slope"]
+        df.loc[mask, "_dvf_intercept"]  = coef["intercept"]
+        df.loc[mask, "dvf_prix_predit"] = predicted
+        df.loc[mask, "dvf_ecart"]       = (y - predicted).round(0)
+        df.loc[mask, "dvf_ecart_pct"]   = ((y - predicted) / predicted * 100).round(1)
+
+    return df
 
 
 # ── Données ────────────────────────────────────────────────────────────────────
@@ -405,6 +457,12 @@ if (not df_scored.empty and "ecart_pct" in df_scored.columns
         and "url" in df_scored.columns and "url" in df.columns):
     _reg_cols = df_scored[["url", "ecart_pct", "ecart", "prix_predit"]].dropna(subset=["url"])
     df = df.merge(_reg_cols, on="url", how="left", suffixes=("", "_reg"))
+
+# DVF statique — coefficients pré-calculés sur dvf_toulon.csv (4 118 ventes Toulon)
+df_dvf = (
+    compute_dvf_scores(df[df["type_local"].notna()].copy())
+    if not df.empty else pd.DataFrame()
+)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 last_upd_str = "—"
@@ -675,29 +733,83 @@ with tab_liste:
 # ════════════════════════════════════════════════════════════════════════════════
 with tab_opps:
 
-    if df_scored.empty or "ecart_pct" not in df_scored.columns:
+    # ── Sélecteur de méthode ─────────────────────────────────────────────────
+    col_meth, _ = st.columns([3, 2])
+    with col_meth:
+        methode = st.radio(
+            "Référence d'évaluation",
+            [
+                "📊 Dynamique — annonces actuelles",
+                "📚 DVF historique — 4 118 ventes Toulon",
+            ],
+            index=0,
+            horizontal=True,
+        )
+    use_dvf = "DVF" in methode
+
+    # ── Aliases selon la méthode ─────────────────────────────────────────────
+    if use_dvf:
+        _df_ref    = df_dvf
+        _col_ep    = "dvf_ecart_pct"
+        _col_e     = "dvf_ecart"
+        _col_pp    = "dvf_prix_predit"
+        _col_slope = "_dvf_slope"
+        _col_inter = "_dvf_intercept"
+    else:
+        _df_ref    = df_scored
+        _col_ep    = "ecart_pct"
+        _col_e     = "ecart"
+        _col_pp    = "prix_predit"
+        _col_slope = "_slope"
+        _col_inter = "_intercept"
+
+    _ref_empty = _df_ref.empty or _col_ep not in _df_ref.columns
+
+    if _ref_empty:
         st.info("😕 Pas assez de données pour calculer la régression.")
     else:
-        # ── Explication méthodo ────────────────────────────────────────────────
-        st.markdown("""
-        <div class="section-card" style="border-top-color:#27AE60;">
-        <strong>🔬 Méthodologie</strong> — Pour chaque type de bien (Appartement / Maison),
-        on calcule une droite de régression linéaire <em>Prix = a × Surface + b</em> à partir
-        de toutes les annonces filtrées. L'<strong>écart</strong> = Prix réel − Prix prédit :
-        un écart <span style="color:#16A34A;font-weight:600">négatif</span> signifie que le bien est
-        <strong>moins cher que ce que le marché laisserait attendre</strong> pour sa surface
-        — c'est une opportunité potentielle.
-        </div>
-        """, unsafe_allow_html=True)
+        # ── Boîte explication méthodo ─────────────────────────────────────────
+        if use_dvf:
+            _n_app   = DVF_REGRESSION["Appartement"]["n"]
+            _n_mais  = DVF_REGRESSION["Maison"]["n"]
+            _r2_app  = DVF_REGRESSION["Appartement"]["r2"]
+            _r2_mais = DVF_REGRESSION["Maison"]["r2"]
+            _sl_app  = DVF_REGRESSION["Appartement"]["slope"]
+            _sl_mais = DVF_REGRESSION["Maison"]["slope"]
+            st.markdown(f"""
+            <div class="section-card" style="border-top-color:#8B5CF6;">
+            <strong>📚 Référence DVF historique</strong> — Prix comparé aux
+            <strong>{_n_app + _n_mais:,} ventes réelles</strong> enregistrées à Toulon
+            (DVF 2023-2025, source DGFiP).<br>
+            Modèles : Appartement = <b>{_sl_app:,.0f} €/m²</b> (n={_n_app:,}, R²={_r2_app})
+            &nbsp;|&nbsp; Maison = <b>{_sl_mais:,.0f} €/m²</b> (n={_n_mais:,}, R²={_r2_mais})<br>
+            <span style="color:#64748B;font-size:12px;">
+            Coefficients fixes — robustes statistiquement, mais ne capturent pas les
+            variations de prix récentes (données ≤ 3 mois).
+            </span>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="section-card" style="border-top-color:#27AE60;">
+            <strong>🔬 Régression dynamique</strong> — Pour chaque type de bien (Appartement / Maison),
+            on calcule une droite de régression linéaire <em>Prix = a × Surface + b</em> à partir
+            de toutes les annonces filtrées. L'<strong>écart</strong> = Prix réel − Prix prédit :
+            un écart <span style="color:#16A34A;font-weight:600">négatif</span> signifie que le bien est
+            <strong>moins cher que ce que le marché laisserait attendre</strong> pour sa surface.<br>
+            <span style="color:#64748B;font-size:12px;">
+            Sensible aux filtres — recalculée à chaque sélection. Moins robuste si peu d'annonces.
+            </span>
+            </div>
+            """, unsafe_allow_html=True)
 
         st.markdown("<br>", unsafe_allow_html=True)
 
         # ── Opportunités = écart < -10 % ──────────────────────────────────────
-        df_opps = df_scored[df_scored["ecart_pct"] < -10].sort_values("ecart_pct")
+        df_opps = _df_ref[_df_ref[_col_ep] < -10].sort_values(_col_ep)
         n_opps  = len(df_opps)
 
-        # Meilleures économies médianes
-        econ_med = df_opps["ecart"].median() if n_opps > 0 else None
+        econ_med = df_opps[_col_e].median() if n_opps > 0 else None
         best_row  = df_opps.iloc[0] if n_opps > 0 else None
 
         # ── KPIs ──────────────────────────────────────────────────────────────
@@ -705,10 +817,10 @@ with tab_opps:
         ko1.metric("🎯 Opportunités détectées",
                    f"{n_opps}",
                    delta=f"écart > 10 % sous le marché")
-        if best_row is not None and pd.notna(best_row["ecart_pct"]):
+        if best_row is not None and pd.notna(best_row[_col_ep]):
             ko2.metric("🏆 Meilleure affaire",
-                       f"{best_row['ecart_pct']:.1f} %",
-                       delta=f"{best_row['ecart']:,.0f} € sous le marché")
+                       f"{best_row[_col_ep]:.1f} %",
+                       delta=f"{best_row[_col_e]:,.0f} € sous le marché")
         else:
             ko2.metric("🏆 Meilleure affaire", "—")
         ko3.metric("💰 Économie médiane",
@@ -717,16 +829,16 @@ with tab_opps:
 
         st.markdown("<br>", unsafe_allow_html=True)
 
-        # ── Scatter prix vs surface + droites de régression ─────────────────
+        # ── Scatter prix vs surface + droite de régression ─────────────────
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
         st.markdown("#### 📈 Prix vs Surface — avec droite de régression")
 
         COLORS_TYPE = {"Appartement": "#E8714A", "Maison": "#1B2B4B"}
         fig_reg = go.Figure()
 
-        for ttype, grp in df_scored.groupby("type_local"):
+        for ttype, grp in _df_ref.groupby("type_local"):
             c = COLORS_TYPE.get(ttype, "#8B5CF6")
-            grp_valid = grp.dropna(subset=["_slope", "_intercept",
+            grp_valid = grp.dropna(subset=[_col_slope, _col_inter,
                                             "surface_reelle_bati", "valeur_fonciere"])
             if grp_valid.empty:
                 continue
@@ -738,7 +850,7 @@ with tab_opps:
                 mode="markers",
                 name=ttype,
                 marker=dict(
-                    color=grp_valid["ecart_pct"].tolist(),
+                    color=grp_valid[_col_ep].tolist(),
                     colorscale="RdYlGn_r",
                     cmin=-30, cmax=30,
                     size=8,
@@ -748,9 +860,9 @@ with tab_opps:
                 ),
                 text=grp_valid["titre"].fillna("").tolist(),
                 customdata=list(zip(
-                    grp_valid["ecart_pct"].tolist(),
-                    grp_valid["ecart"].fillna(0).tolist(),
-                    grp_valid["prix_predit"].fillna(0).tolist(),
+                    grp_valid[_col_ep].tolist(),
+                    grp_valid[_col_e].fillna(0).tolist(),
+                    grp_valid[_col_pp].fillna(0).tolist(),
                 )),
                 hovertemplate=(
                     "<b>%{text}</b><br>"
@@ -763,15 +875,15 @@ with tab_opps:
             ))
 
             # Droite de régression
-            slope     = float(grp_valid["_slope"].iloc[0])
-            intercept = float(grp_valid["_intercept"].iloc[0])
+            slope     = float(grp_valid[_col_slope].iloc[0])
+            intercept = float(grp_valid[_col_inter].iloc[0])
             x_min     = float(grp_valid["surface_reelle_bati"].min())
             x_max     = float(grp_valid["surface_reelle_bati"].max())
             fig_reg.add_trace(go.Scatter(
                 x=[x_min, x_max],
                 y=[slope * x_min + intercept, slope * x_max + intercept],
                 mode="lines",
-                name=f"Tendance {ttype}",
+                name=f"Tendance {ttype}" + (" (DVF)" if use_dvf else ""),
                 line=dict(color=c, width=2, dash="dash"),
             ))
 
@@ -816,14 +928,14 @@ with tab_opps:
                 )
                 fig_bar = px.bar(
                     top15,
-                    x="ecart_pct",
+                    x=_col_ep,
                     y="label",
                     orientation="h",
-                    color="ecart_pct",
+                    color=_col_ep,
                     color_continuous_scale="RdYlGn_r",
                     range_color=[-40, 0],
-                    text=top15["ecart_pct"].apply(lambda v: f"{v:.1f} %"),
-                    labels={"ecart_pct": "Écart (%)", "label": ""},
+                    text=top15[_col_ep].apply(lambda v: f"{v:.1f} %"),
+                    labels={_col_ep: "Écart (%)", "label": ""},
                     template="simple_white",
                 )
                 fig_bar.update_traces(textposition="outside")
@@ -846,9 +958,9 @@ with tab_opps:
                     "titre":               "Titre",
                     "type_local":          "Type",
                     "valeur_fonciere":     "Prix réel (€)",
-                    "prix_predit":         "Prix attendu (€)",
-                    "ecart":               "Économie (€)",
-                    "ecart_pct":           "Écart (%)",
+                    _col_pp:               "Prix attendu (€)",
+                    _col_e:                "Économie (€)",
+                    _col_ep:               "Écart (%)",
                     "surface_reelle_bati": "Surface (m²)",
                     "url":                 "Lien",
                 }
@@ -883,8 +995,8 @@ with tab_opps:
                 prix    = row.get("valeur_fonciere")
                 surface = row.get("surface_reelle_bati")
                 pm2     = row.get("prix_m2")
-                ecart_p = row.get("ecart_pct")
-                ecart_e = row.get("ecart")
+                ecart_p = row.get(_col_ep)
+                ecart_e = row.get(_col_e)
                 tags    = row.get("tags", [])
                 source  = str(row.get("source", "")).upper()
 
@@ -901,7 +1013,7 @@ with tab_opps:
                         if pd.notna(ecart_p):
                             st.markdown(market_badge_html(float(ecart_p)), unsafe_allow_html=True)
                             if pd.notna(ecart_e):
-                                prix_p = row.get("prix_predit")
+                                prix_p = row.get(_col_pp)
                                 st.markdown(
                                     f'<div style="background:#F0FDF4;border:1px solid #BBF7D0;'
                                     f'border-radius:8px;padding:6px 12px;margin:6px 0;">'

@@ -29,15 +29,18 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Nombre max de pages par défaut — valeur volontairement élevée.
-# Le scraper s'arrête tout seul dès qu'une page ne renvoie aucune annonce,
-# donc cette limite n'est qu'un filet de sécurité anti-boucle infinie.
-MAX_PAGES_DEFAULT = 50
+# Nombre max de pages par défaut.
+# Le scraper s'arrête tout seul dès qu'une page est vide OU que toutes ses
+# URLs ont déjà été vues (pagination circulaire). Cette limite est un filet
+# de sécurité supplémentaire.
+MAX_PAGES_DEFAULT = 20
 PRIX_MAX = 500_000          # filtre côté client (certains sites ignorent le filtre URL)
 
 import pandas as pd
 
 from scraping.flaresolverr_client import FlareSolverrClient
+from scraping.scrapers.bienici import BienIciScraper
+from scraping.scrapers.figaro import FigaroScraper
 from scraping.scrapers.leboncoin import LeboncoinScraper
 from scraping.scrapers.pap import PapScraper
 from scraping.scrapers.seloger import SeLogerScraper
@@ -50,12 +53,10 @@ SEARCH_URLS: dict[str, str] = {
         "https://www.pap.fr/annonce/vente-appartement-maison-toulon-83"
         "-g43624-jusqu-a-500000-euros"
     ),
+    # URL navigateur standard (plus résistante aux changements Next.js que /classified-search)
     "seloger": (
-        "https://www.seloger.com/classified-search"
-        "?distributionTypes=Buy"
-        "&estateTypes=House,Apartment"
-        "&locations=AD08FR34378"
-        "&priceMax=500000"
+        "https://www.seloger.com/vente/appartements-maisons/var--83/toulon/"
+        "?prix_max=500000"
     ),
     "leboncoin": (
         "https://www.leboncoin.fr/recherche"
@@ -64,12 +65,24 @@ SEARCH_URLS: dict[str, str] = {
         "&price=min-500000"
         "&real_estate_type=1,2"
     ),
+    # Agrégateur majeur (agences + particuliers) — moins bloqué que SeLoger
+    "bienici": (
+        "https://www.bienici.com/recherche/achat/appartement,maison"
+        "/toulon-83000/?prix-max=500000"
+    ),
+    # Portail presse Figaro — généralement moins protégé
+    "figaro": (
+        "https://immobilier.lefigaro.fr/annonces/immobilier-vente"
+        "/toulon-83000.html"
+    ),
 }
 
 SCRAPERS: dict[str, type] = {
-    "pap": PapScraper,
-    "seloger": SeLogerScraper,
+    "pap":       PapScraper,
+    "seloger":   SeLogerScraper,
     "leboncoin": LeboncoinScraper,
+    "bienici":   BienIciScraper,
+    "figaro":    FigaroScraper,
 }
 
 OUTPUT_DIR = Path("data")
@@ -234,23 +247,48 @@ def _align_dvf_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 # ─── Nettoyage post-scraping ──────────────────────────────────────────────────
 
+
+# Domaines officiels attendus par scraper — toute URL hors-domaine est rejetée
+# (ex: PAP redirige les programmes neufs vers immoneuf.com)
+_DOMAINE_PAR_SITE: dict[str, str] = {
+    "pap":       "pap.fr",
+    "seloger":   "seloger.com",
+    "leboncoin": "leboncoin.fr",
+    "bienici":   "bienici.com",
+    "figaro":    "lefigaro.fr",
+}
+
+
 def _clean(df: pd.DataFrame, logger, label: str) -> pd.DataFrame:
     """
     Nettoie un DataFrame d'annonces :
-      1. Supprime les doublons par URL (SeLoger répète les annonces premium)
-      2. Filtre les prix > PRIX_MAX (certains sites ignorent le filtre URL)
-      3. Supprime les lignes sans prix ET sans surface (données inutilisables)
+      1. Supprime les doublons par URL
+      2. Filtre les URLs hors-domaine (ex : PAP → immoneuf.com)
+      3. Filtre les prix > PRIX_MAX
+      4. Supprime les annonces sans surface (inutilisables pour l'analyse)
     """
     n_avant = len(df)
 
-    # 1. Dédoublonnage sur l'URL (garde la première occurrence)
+    # 1. Dédoublonnage sur l'URL normalisée (sans query string de pagination)
     if "url" in df.columns:
         df = df.drop_duplicates(subset=["url"], keep="first")
         n_dup = n_avant - len(df)
         if n_dup:
             logger.info(f"[{label.upper()}] {n_dup} doublons supprimés (même URL)")
 
-    # 2. Filtre prix > 500 000 €
+    # 2. Filtre les URLs hors-domaine (ne s'applique qu'aux passes par-site, pas "all")
+    domaine_attendu = _DOMAINE_PAR_SITE.get(label)
+    if domaine_attendu and "url" in df.columns:
+        masque_domaine = df["url"].isna() | df["url"].str.contains(domaine_attendu, na=False)
+        n_hors_domaine = (~masque_domaine).sum()
+        df = df[masque_domaine]
+        if n_hors_domaine:
+            logger.info(
+                f"[{label.upper()}] {n_hors_domaine} annonces hors-domaine supprimees "
+                f"(URL hors '{domaine_attendu}' - ex: redirections partenaires)"
+            )
+
+    # 3. Filtre prix > 500 000 €
     if "prix" in df.columns:
         masque_prix = df["prix"].isna() | (df["prix"] <= PRIX_MAX)
         n_hors_budget = (~masque_prix).sum()
@@ -258,13 +296,25 @@ def _clean(df: pd.DataFrame, logger, label: str) -> pd.DataFrame:
         if n_hors_budget:
             logger.info(f"[{label.upper()}] {n_hors_budget} annonces > {PRIX_MAX:,} € supprimées")
 
-    # 3. Supprime les lignes sans prix ET sans surface (données vides)
-    if "prix" in df.columns and "surface" in df.columns:
-        masque_vide = df["prix"].isna() & df["surface"].isna()
-        n_vide = masque_vide.sum()
-        df = df[~masque_vide]
-        if n_vide:
-            logger.info(f"[{label.upper()}] {n_vide} lignes sans prix ni surface supprimées")
+    # 4. Supprime les annonces sans surface (inutilisables pour l'analyse immobilière)
+    if "surface" in df.columns:
+        masque_sans_surface = df["surface"].isna()
+        n_sans_surface = masque_sans_surface.sum()
+        df = df[~masque_sans_surface]
+        if n_sans_surface:
+            logger.info(f"[{label.upper()}] {n_sans_surface} annonces sans surface supprimées")
+
+    # 5. Filtre ville : garde uniquement Toulon
+    for col in ("localisation", "nom_commune"):
+        if col in df.columns:
+            masque_toulon = df[col].str.contains("toulon", case=False, na=False)
+            n_hors_ville = (~masque_toulon).sum()
+            df = df[masque_toulon]
+            if n_hors_ville:
+                logger.info(
+                    f"[{label.upper()}] {n_hors_ville} annonces hors-Toulon supprimées"
+                )
+            break
 
     return df.reset_index(drop=True)
 
@@ -286,7 +336,7 @@ def _parse_args() -> argparse.Namespace:
         "--site",
         choices=[*SCRAPERS.keys(), "all"],
         default="all",
-        help="Site à scraper : pap | seloger | leboncoin | all (défaut: all)",
+        help="Site a scraper : pap | seloger | leboncoin | bienici | figaro | all (defaut: all)",
     )
     parser.add_argument(
         "--flaresolverr",

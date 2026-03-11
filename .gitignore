@@ -31,8 +31,7 @@ notebook_execution.log
 # Claude (configuration locale de l'IA)
 .claude/
 
-# Scraping — fichier généré automatiquement à chaque run
-data/annonces.csv
-
 # Scraping — dossier de debug HTML (--save-html)
 debug_html/
+
+# data/annonces.csv est volontairement TRACKÉ en git (mis à jour par GitHub Actions)

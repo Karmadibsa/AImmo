@@ -29,10 +29,11 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-# Nombre max de pages par défaut — valeur volontairement élevée.
-# Le scraper s'arrête tout seul dès qu'une page ne renvoie aucune annonce,
-# donc cette limite n'est qu'un filet de sécurité anti-boucle infinie.
-MAX_PAGES_DEFAULT = 50
+# Nombre max de pages par défaut.
+# Le scraper s'arrête tout seul dès qu'une page est vide OU que toutes ses
+# URLs ont déjà été vues (pagination circulaire). Cette limite est un filet
+# de sécurité supplémentaire.
+MAX_PAGES_DEFAULT = 20
 PRIX_MAX = 500_000          # filtre côté client (certains sites ignorent le filtre URL)
 
 import pandas as pd

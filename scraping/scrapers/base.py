@@ -88,6 +88,7 @@ class BaseScraper(ABC):
         self.results = []
         url: Optional[str] = start_url
         scraped_at = datetime.now().isoformat()
+        seen_urls: set[str] = set()   # détection pagination circulaire
 
         if html_dump_dir:
             Path(html_dump_dir).mkdir(parents=True, exist_ok=True)
@@ -115,6 +116,19 @@ class BaseScraper(ABC):
                         f"[{self.SOURCE.upper()}] Aucune annonce page {page} → arrêt pagination"
                     )
                     break
+
+                # ── Détection pagination circulaire ────────────────────────
+                # Certains sites (ex: PAP) renvoient indéfiniment les dernières
+                # annonces au lieu d'une page vide → on stoppe si toutes les
+                # URLs de la page ont déjà été vues.
+                page_urls = {item.get("url", "") for item in items if item.get("url")}
+                if page_urls and page_urls.issubset(seen_urls):
+                    logger.info(
+                        f"[{self.SOURCE.upper()}] Page {page} : 0 nouvelle URL "
+                        f"({len(page_urls)} déjà vues) → pagination circulaire détectée, arrêt."
+                    )
+                    break
+                seen_urls.update(page_urls)
 
                 # Injection des champs meta
                 for item in items:

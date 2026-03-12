@@ -87,13 +87,31 @@ def _fetch_page(url: str) -> dict:
 
 # ── Parsing d'une annonce ─────────────────────────────────────────────────────
 
+def _to_float(val) -> float | None:
+    """
+    Convertit en float de manière robuste.
+    Gère les cas où l'API BienIci retourne une liste (fourchette de prix)
+    ou une valeur nulle/invalide.
+    """
+    if val is None:
+        return None
+    if isinstance(val, list):
+        val = val[0] if val else None
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_annonce(ad: dict, scraped_at: str) -> dict | None:
     """
     Transforme une annonce brute BienIci en ligne prête pour Supabase.
     Retourne None si l'annonce manque de prix ou de surface.
     """
-    prix    = ad.get("price")
-    surface = ad.get("surfaceArea")
+    prix    = _to_float(ad.get("price"))
+    surface = _to_float(ad.get("surfaceArea"))
 
     # Annonces sans prix ni surface : inutilisables pour l'analyse
     if not prix or not surface:
@@ -106,8 +124,8 @@ def _parse_annonce(ad: dict, scraped_at: str) -> dict | None:
     type_bien = PROPERTY_TYPE_MAP.get(raw_type, raw_type.capitalize() if raw_type else "Autre")
 
     # Source : nom agence si dispo, sinon particulier / BienIci
-    source    = "BienIci"
-    agencies  = (ad.get("userRelativeData") or {}).get("agencies", [])
+    source   = "BienIci"
+    agencies = (ad.get("userRelativeData") or {}).get("agencies", [])
     if agencies and agencies[0].get("name"):
         source = agencies[0]["name"]
     elif ad.get("accountDisplayName"):
@@ -119,8 +137,8 @@ def _parse_annonce(ad: dict, scraped_at: str) -> dict | None:
     return {
         "lien":         f"https://www.bienici.com/annonce/{ad_id}",
         "titre":        ad.get("title") or f"{type_bien} {surface} m² — {quartier}",
-        "prix":         float(prix),
-        "surface":      float(surface),
+        "prix":         prix,
+        "surface":      surface,
         "pieces":       ad.get("roomsQuantity"),
         "quartier":     quartier,
         "type_bien":    type_bien,

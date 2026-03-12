@@ -1,31 +1,78 @@
 """
 Chargement et pré-traitement des données immobilières.
+
+Priorité des sources :
+  1. Supabase  — si SUPABASE_URL + SUPABASE_KEY sont définis (prod / GitHub Actions)
+  2. CSV local — data/annonces.csv (fallback dev / hors-ligne)
+
 Cache Streamlit (TTL 5 min) pour éviter les rechargements fréquents.
 """
+
+import os
 
 import pandas as pd
 import streamlit as st
 
-from config import GITHUB_RAW_URL, CSV_PATH, DVF_CSV_PATH, DVF_REGRESSION, DVF_PM2_FILTERS
+from config import CSV_PATH, DVF_CSV_PATH, DVF_PM2_FILTERS, DVF_REGRESSION
 from analysis.regression import least_squares_fit, r_squared
 from ui.components import extract_tags
 
+# ── Mapping colonnes Supabase → noms attendus par l'app ──────────────────────
+# La table Supabase utilise des noms courts ; l'app utilise le schéma DVF.
+SUPABASE_COL_MAP: dict[str, str] = {
+    "lien":      "url",
+    "prix":      "valeur_fonciere",
+    "surface":   "surface_reelle_bati",
+    "pieces":    "nombre_pieces_principales",
+    "quartier":  "nom_commune",
+    "type_bien": "type_local",
+    # "titre", "source", "description" gardent leur nom
+}
+
+
+# ── Chargement principal ──────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
 def load_data() -> pd.DataFrame:
     """
-    Charge les données depuis GitHub (priorité) ou le CSV local (fallback).
+    Charge les annonces depuis Supabase (prod) ou le CSV local (dev/fallback).
     Retourne un DataFrame vide si aucune source n'est disponible.
     """
-    try:
-        df = pd.read_csv(GITHUB_RAW_URL, encoding="utf-8-sig")
-    except Exception:
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+
+    df = pd.DataFrame()
+
+    # ── Source 1 : Supabase ──────────────────────────────────────────────────
+    if supabase_url and supabase_key:
+        try:
+            from supabase import create_client  # import tardif — pas requis en dev
+
+            client = create_client(supabase_url, supabase_key)
+            result = client.table("annonces").select("*").execute()
+
+            if result.data:
+                df = pd.DataFrame(result.data)
+                df = df.rename(columns=SUPABASE_COL_MAP)
+
+        except Exception as e:
+            st.warning(f"⚠️ Supabase indisponible ({e}). Utilisation du CSV local.")
+
+    # ── Source 2 : CSV local (fallback) ─────────────────────────────────────
+    if df.empty:
         if not CSV_PATH.exists():
             return pd.DataFrame()
         df = pd.read_csv(CSV_PATH, encoding="utf-8-sig")
 
+    # ── Post-traitement commun ────────────────────────────────────────────────
+    return _process(df)
+
+
+def _process(df: pd.DataFrame) -> pd.DataFrame:
+    """Nettoyage et enrichissement communs (Supabase ou CSV)."""
+
     # Conversion numérique
-    for col in ["valeur_fonciere", "surface_reelle_bati", "nombre_pieces_principales"]:
+    for col in ("valeur_fonciere", "surface_reelle_bati", "nombre_pieces_principales"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
@@ -37,9 +84,11 @@ def load_data() -> pd.DataFrame:
     ).round(0)
     df["prix_m2"] = pd.to_numeric(df["prix_m2"], errors="coerce")
 
-    # Date
-    if "date_mutation" in df.columns:
-        df["date_mutation"] = pd.to_datetime(df["date_mutation"], errors="coerce")
+    # Date de mise à jour : date_scraped (Supabase) ou date_mutation (CSV)
+    for date_col in ("date_scraped", "date_mutation"):
+        if date_col in df.columns:
+            df["date_mutation"] = pd.to_datetime(df[date_col], errors="coerce")
+            break
 
     # Tags NLP
     if "description" in df.columns:
@@ -47,6 +96,8 @@ def load_data() -> pd.DataFrame:
 
     return df
 
+
+# ── Modèles DVF dynamiques ────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)
 def get_dvf_models(dvf_csv_path: str = str(DVF_CSV_PATH)) -> dict:

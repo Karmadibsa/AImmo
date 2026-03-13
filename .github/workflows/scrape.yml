@@ -1,88 +1,47 @@
-name: "🔄 Scraping immobilier — Toulon"
+name: "🔄 Scraping immobilier → Supabase"
 
-# ─── Déclencheurs ──────────────────────────────────────────────────────────────
+# ─── Déclencheurs ───────────────────────────────────────────────────────────────
 on:
   schedule:
-    - cron: "0 * * * *"  # S'exécute à la minute 0 de chaque heure
+    - cron: "0 7,13,19 * * *"  # 3×/jour : 7h, 13h, 19h UTC (9h/15h/21h Paris)
   workflow_dispatch:             # déclenchement manuel depuis l'onglet Actions
-                                 # → choisir la branche dans le menu déroulant GitHub
 
-# ─── Permissions ───────────────────────────────────────────────────────────────
+# ─── Permissions ────────────────────────────────────────────────────────────────
+# Plus de git push → plus besoin de contents: write
 permissions:
-  contents: write                # nécessaire pour git push
+  contents: read
 
-# ─── Job ───────────────────────────────────────────────────────────────────────
+# ─── Job ────────────────────────────────────────────────────────────────────────
 jobs:
   scrape:
-    name: "Scraping + commit annonces.csv"
+    name: "BienIci → Supabase"
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-
-    # ── FlareSolverr en service Docker (pas besoin de docker-compose) ─────────
-    services:
-      flaresolverr:
-        image: ghcr.io/flaresolverr/flaresolverr:latest
-        ports:
-          - 8191:8191
-        env:
-          LOG_LEVEL: warn
-          TZ: Europe/Paris
+    timeout-minutes: 15          # BienIci API est rapide, 15 min largement suffisant
 
     steps:
-      # ── 1. Checkout — suit la branche qui déclenche le workflow ────────────
-      #    • workflow_dispatch depuis une branche de test → checkout cette branche
-      #    • schedule (cron) → checkout main par défaut (branche par défaut du repo)
+      # ── 1. Checkout de la branche de travail (code à jour) ─────────────────────
+      # Le workflow est sur main (pour être visible dans Actions),
+      # mais le code scraping est sur mise-a-jour-scraper.
       - name: "📥 Checkout"
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: mise-a-jour-scraper
 
-      # ── 2. Python ───────────────────────────────────────────────────────────
+      # ── 2. Python 3.11 ─────────────────────────────────────────────────────────
       - name: "🐍 Setup Python 3.11"
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
-      # ── 3. Dépendances scraping ──────────────────────────────────────────────
+      # ── 3. Dépendances ─────────────────────────────────────────────────────────
       - name: "📦 Installer les dépendances"
-        run: |
-          pip install --upgrade pip
-          pip install pandas requests beautifulsoup4 lxml
+        run: pip install supabase requests
 
-      # ── 4. Attendre que FlareSolverr soit prêt ──────────────────────────────
-      - name: "⏳ Attendre FlareSolverr (max 60s)"
-        run: |
-          echo "En attente de FlareSolverr sur http://localhost:8191..."
-          for i in $(seq 1 20); do
-            if curl -sf http://localhost:8191 > /dev/null 2>&1; then
-              echo "✅ FlareSolverr prêt !"
-              break
-            fi
-            echo "  tentative $i/20, attente 3s..."
-            sleep 3
-          done
-          curl -sf http://localhost:8191 || (echo "❌ FlareSolverr inaccessible" && exit 1)
-
-      # ── 5. Scraping ─────────────────────────────────────────────────────────
-      - name: "🕷️ Scraping (PAP + SeLoger + LeBoncoin + BienIci + Figaro)"
-        run: python -m scraping.run_scraping --flaresolverr http://localhost:8191
+      # ── 4. Scraping BienIci + push Supabase ────────────────────────────────────
+      - name: "🕷️ Scraping BienIci → Supabase"
         env:
-          PYTHONPATH: ${{ github.workspace }}
-
-      # ── 6. Commit + push si le CSV a changé ─────────────────────────────────
-      - name: "💾 Commit annonces.csv"
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          git add data/annonces.csv
-
-          if git diff --staged --quiet; then
-            echo "ℹ️  Aucune modification dans annonces.csv — pas de commit."
-          else
-            N=$(( $(wc -l < data/annonces.csv) - 1 ))
-            git commit -m "chore(data): ${N} annonces mises à jour [skip ci]"
-            git push                        # pousse sur la branche courante (main ou branche test)
-            echo "✅ annonces.csv commité ($N annonces) sur $(git branch --show-current)."
-          fi
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          PYTHONPATH:   ${{ github.workspace }}
+        run: python -m scraping.run_scraping

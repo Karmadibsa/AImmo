@@ -108,6 +108,12 @@ def _to_float(val) -> float | None:
         return None
 
 
+def _to_int(val) -> int | None:
+    """Convertit en int via _to_float — gère aussi les listes (ex: roomsQuantity)."""
+    f = _to_float(val)
+    return int(f) if f is not None else None
+
+
 def _parse_annonce(ad: dict) -> dict | None:
     """
     Transforme une annonce brute BienIci en ligne prête pour Supabase.
@@ -142,7 +148,7 @@ def _parse_annonce(ad: dict) -> dict | None:
         "titre":     ad.get("title") or f"{type_bien} {surface} m² — {quartier}",
         "prix":      prix,
         "surface":   surface,
-        "pieces":    ad.get("roomsQuantity"),
+        "pieces":    _to_int(ad.get("roomsQuantity")),
         "quartier":  quartier,
         "type_bien": type_bien,
         "source":    source,

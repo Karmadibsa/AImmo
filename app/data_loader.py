@@ -49,10 +49,25 @@ def load_data() -> pd.DataFrame:
             from supabase import create_client  # import tardif — pas requis en dev
 
             client = create_client(supabase_url, supabase_key)
-            result = client.table("annonces").select("*").execute()
 
-            if result.data:
-                df = pd.DataFrame(result.data)
+            # Pagination : Supabase limite à 1 000 lignes par requête
+            PAGE  = 1_000
+            rows  = []
+            start = 0
+            while True:
+                batch = (
+                    client.table("annonces")
+                    .select("*")
+                    .range(start, start + PAGE - 1)
+                    .execute()
+                ).data or []
+                rows.extend(batch)
+                if len(batch) < PAGE:
+                    break
+                start += PAGE
+
+            if rows:
+                df = pd.DataFrame(rows)
                 df = df.rename(columns=SUPABASE_COL_MAP)
 
         except Exception as e:
@@ -84,8 +99,8 @@ def _process(df: pd.DataFrame) -> pd.DataFrame:
     ).round(0)
     df["prix_m2"] = pd.to_numeric(df["prix_m2"], errors="coerce")
 
-    # Date de mise à jour : date_scraped (Supabase) ou date_mutation (CSV)
-    for date_col in ("date_scraped", "date_mutation"):
+    # Date de mise à jour : date_publication (Supabase) ou date_mutation (CSV)
+    for date_col in ("date_publication", "date_scraped", "date_mutation"):
         if date_col in df.columns:
             df["date_mutation"] = pd.to_datetime(df[date_col], errors="coerce")
             break

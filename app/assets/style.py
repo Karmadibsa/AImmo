@@ -22,7 +22,16 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
    SIDEBAR — fond sombre, texte clair
    (config.toml ne peut pas mettre la sidebar en dark en mode light)
 ══════════════════════════════════════════════════════════════════ */
-[data-testid="stSidebar"] { background: #1B2B4B !important; }
+[data-testid="stSidebar"] {
+    background: #1B2B4B !important;
+    color: #CBD5E1 !important;
+}
+[data-testid="stSidebar"] div,
+[data-testid="stSidebar"] span,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] label,
+[data-testid="stSidebar"] .stSlider [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] [data-baseweb="slider"] [data-testid="stMarkdownContainer"] p { color: #CBD5E1 !important; }
 
 [data-testid="stSidebar"] p,
 [data-testid="stSidebar"] label,

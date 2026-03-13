@@ -213,6 +213,17 @@ def _parse_annonce(ad: dict) -> dict | None:
         "date_publication":   _pub_date(ad.get("publicationDate")),
         # ── Texte ─────────────────────────────────────────────────────────────
         "description":        ad.get("description") or None,
+        "nb_balcons":      _to_int(ad.get("balconyQuantity")),
+        "nb_terrasses":    _to_int(ad.get("terracesQuantity")),
+        "visite_virtuelle": next(
+            (t.get("url") for t in (ad.get("virtualTours") or []) if t.get("url")),
+            None,
+        ),
+        "photos":          [
+            p.get("url_photo") or p.get("url")
+            for p in (ad.get("photos") or [])
+            if p.get("url_photo") or p.get("url")
+        ] or None,
     }
 
 

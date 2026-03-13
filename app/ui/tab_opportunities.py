@@ -15,6 +15,7 @@ def render_opportunities(
     df: pd.DataFrame,
     df_dvf: pd.DataFrame,
     df_scored: pd.DataFrame,
+    df_qrt: pd.DataFrame | None = None,
 ) -> None:
 
     # ── Sélecteur de méthode ─────────────────────────────────────────────────
@@ -22,16 +23,21 @@ def render_opportunities(
     with col_meth:
         methode = st.radio(
             "Référence d'évaluation",
-            ["📚 DVF historique", "📊 Dynamique — annonces actuelles"],
+            ["📚 DVF historique", "📊 Dynamique — annonces actuelles", "📍 Par quartier (−1.5 σ)"],
             index=0,
             horizontal=True,
         )
     use_dvf = "DVF" in methode
+    use_qrt = "quartier" in methode
 
     # Alias selon la méthode choisie
     if use_dvf:
         _df_ref, _col_ep, _col_e, _col_pp = df_dvf, "dvf_ecart_pct", "dvf_ecart", "dvf_prix_predit"
         _col_slope, _col_inter = "_dvf_slope", "_dvf_intercept"
+    elif use_qrt:
+        _df_ref = df_qrt if df_qrt is not None and not df_qrt.empty else df_scored
+        _col_ep, _col_e, _col_pp = "qrt_ecart_pct", "qrt_ecart", "qrt_prix_predit"
+        _col_slope, _col_inter = None, None  # pas de droite de régression pour la méthode quartier
     else:
         _df_ref, _col_ep, _col_e, _col_pp = df_scored, "ecart_pct", "ecart", "prix_predit"
         _col_slope, _col_inter = "_slope", "_intercept"
@@ -39,6 +45,17 @@ def render_opportunities(
     if _df_ref.empty or _col_ep not in _df_ref.columns:
         st.info("😕 Pas assez de données pour calculer la régression.")
         return
+
+    # ── Info Quartier ─────────────────────────────────────────────────────────
+    if use_qrt:
+        n_qrt = _df_ref["nom_commune"].nunique() if "nom_commune" in _df_ref.columns else 0
+        st.markdown(f"""
+        <div class="section-card" style="border-top:3px solid #0E7490;">
+        <strong>📍 Méthode par quartier</strong> — Seuil : prix/m² &lt; moyenne quartier − 1.5×σ.<br>
+        Calcul <strong>from scratch</strong> (pur Python) sur <strong>{n_qrt} quartiers</strong> détectés.
+        Un bien est "Opportunité" s'il est statistiquement sous-évalué dans son propre secteur géographique.
+        </div>
+        """, unsafe_allow_html=True)
 
     # ── Info DVF uniquement ──────────────────────────────────────────────────
     if use_dvf:
@@ -80,7 +97,8 @@ def render_opportunities(
 
     for ttype, grp in _df_ref.groupby("type_local"):
         c = COLORS_TYPE.get(ttype, "#8B5CF6")
-        grp_valid = grp.dropna(subset=[_col_slope, _col_inter, "surface_reelle_bati", "valeur_fonciere"])
+        _dropna_cols = [col for col in [_col_slope, _col_inter, "surface_reelle_bati", "valeur_fonciere"] if col is not None]
+        grp_valid = grp.dropna(subset=_dropna_cols)
         if grp_valid.empty:
             continue
 
@@ -109,17 +127,18 @@ def render_opportunities(
                 "<extra>" + ttype + "</extra>"
             ),
         ))
-        slope     = float(grp_valid[_col_slope].iloc[0])
-        intercept = float(grp_valid[_col_inter].iloc[0])
-        x_min     = float(grp_valid["surface_reelle_bati"].min())
-        x_max     = float(grp_valid["surface_reelle_bati"].max())
-        fig_reg.add_trace(go.Scatter(
-            x=[x_min, x_max],
-            y=[slope * x_min + intercept, slope * x_max + intercept],
-            mode="lines",
-            name=f"Tendance {ttype}" + (" (DVF)" if use_dvf else ""),
-            line=dict(color=c, width=2, dash="dash"),
-        ))
+        if _col_slope and _col_inter and _col_slope in grp_valid.columns:
+            slope     = float(grp_valid[_col_slope].iloc[0])
+            intercept = float(grp_valid[_col_inter].iloc[0])
+            x_min     = float(grp_valid["surface_reelle_bati"].min())
+            x_max     = float(grp_valid["surface_reelle_bati"].max())
+            fig_reg.add_trace(go.Scatter(
+                x=[x_min, x_max],
+                y=[slope * x_min + intercept, slope * x_max + intercept],
+                mode="lines",
+                name=f"Tendance {ttype}" + (" (DVF)" if use_dvf else ""),
+                line=dict(color=c, width=2, dash="dash"),
+            ))
 
     fig_reg.add_trace(go.Scatter(
         x=[None], y=[None], mode="markers",

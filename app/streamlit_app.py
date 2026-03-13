@@ -6,7 +6,12 @@ Point d'entrée de l'application Streamlit.
 import pandas as pd
 import streamlit as st
 
-from analysis.regression import compute_dvf_scores, compute_regression
+from analysis.regression import (
+    compute_dvf_scores,
+    compute_multivariate_regression,
+    compute_neighborhood_scores,
+    compute_regression,
+)
 from assets.style import inject_css
 from config import DVF_CSV_PATH
 from data_loader import get_dvf_models, load_data
@@ -122,6 +127,10 @@ df_dvf = (
     compute_dvf_scores(df[df["type_local"].notna()].copy(), models=dvf_models)
     if not df.empty else pd.DataFrame()
 )
+df_qrt = (
+    compute_neighborhood_scores(df[df["type_local"].notna()].copy())
+    if not df.empty else pd.DataFrame()
+)
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 last_upd_str = "—"
@@ -168,7 +177,7 @@ with tab_liste:
     render_list(df)
 
 with tab_opps:
-    render_opportunities(df, df_dvf, df_scored)
+    render_opportunities(df, df_dvf, df_scored, df_qrt)
 
 with tab_asst:
     render_assistant(df_scored)

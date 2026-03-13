@@ -124,17 +124,33 @@ def _pub_date(val: str | None) -> str | None:
     return None if not val or val.startswith("1970") else val
 
 
+# Prix minimum réaliste pour une transaction immobilière
+PRIX_MIN = 10_000
+
+
 def _parse_annonce(ad: dict) -> dict | None:
     """
     Transforme une annonce brute BienIci en ligne prête pour Supabase.
-    Retourne None si l'annonce manque de prix ou de surface.
-    Capture l'ensemble des champs utiles exposés par l'API BienIci.
+    Filtre et retourne None pour :
+      - annonces hors-marché (status.onTheMarket == False)
+      - viager avec rente mensuelle (lifeAnnuityMonthlyAllowance > 0)
+      - prix < 10 000 € (données corrompues / test)
+      - prix ou surface manquants
     """
+    # ── 1. Annonces hors-marché (expirées, vendues, retirées) ─────────────────
+    status = ad.get("status") or {}
+    if not status.get("onTheMarket", True):
+        return None
+
+    # ── 2. Viager avec rente mensuelle — prix = rente, pas valeur réelle ──────
+    if (ad.get("lifeAnnuityMonthlyAllowance") or 0) > 0:
+        return None
+
     prix    = _to_float(ad.get("price"))
     surface = _to_float(ad.get("surfaceArea"))
 
-    # Annonces sans prix ni surface : inutilisables pour l'analyse
-    if not prix or not surface:
+    # ── 3. Prix ou surface manquants / prix irréaliste ────────────────────────
+    if not prix or not surface or prix < PRIX_MIN:
         return None
 
     ad_id = ad.get("id", "")

@@ -1,366 +1,339 @@
 """
-Script principal de scraping immobilier via FlareSolverr.
+Scraping immobilier BienIci → Supabase.
 
-Scrape PAP.fr, SeLoger.com et LeBoncoin.fr pour les biens à Toulon (≤ 500 000 €).
-Le résultat est sauvegardé dans un unique fichier CSV avec un nom fixe
-(pas de timestamp) pour que le frontend puisse toujours lire le même fichier.
+Architecture :
+  - Appel direct à l'API JSON publique de BienIci (sans FlareSolverr)
+  - Pagination automatique : récupère la totalité des annonces disponibles
+  - Upsert vers Supabase par lots (lien = clé primaire, pas de doublons)
+  - Exécuté quotidiennement par GitHub Actions ou manuellement
 
-Fichier généré (écrasé à chaque run) :
-  data/annonces.csv       ← tous sites combinés, lu par le front
+Variables d'environnement requises (secrets GitHub Actions) :
+  SUPABASE_URL  — URL du projet Supabase (ex: https://xxxx.supabase.co)
+  SUPABASE_KEY  — Clé publique anon key
 
-Usage :
-  # Scraper tous les sites (toutes les pages disponibles)
-  python -m scraping.run_scraping
-
-  # Limiter le nombre de pages (utile pour tester)
-  python -m scraping.run_scraping --max-pages 5
-
-  # Scraper un seul site
-  python -m scraping.run_scraping --site leboncoin
-
-  # FlareSolverr sur un autre hôte (ex: docker-compose)
-  python -m scraping.run_scraping --flaresolverr http://flaresolverr:8191
+Usage local (pour tester) :
+  SUPABASE_URL=... SUPABASE_KEY=... python -m scraping.run_scraping
 """
 
-import argparse
+import json
 import logging
-import re
+import os
 import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime
-from pathlib import Path
 
-# Nombre max de pages par défaut.
-# Le scraper s'arrête tout seul dès qu'une page est vide OU que toutes ses
-# URLs ont déjà été vues (pagination circulaire). Cette limite est un filet
-# de sécurité supplémentaire.
-MAX_PAGES_DEFAULT = 20
-PRIX_MAX = 500_000          # filtre côté client (certains sites ignorent le filtre URL)
+from supabase import create_client
 
-import pandas as pd
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("scraping.bienici")
 
-from scraping.flaresolverr_client import FlareSolverrClient
-from scraping.scrapers.bienici import BienIciScraper
-from scraping.scrapers.figaro import FigaroScraper
-from scraping.scrapers.leboncoin import LeboncoinScraper
-from scraping.scrapers.pap import PapScraper
-from scraping.scrapers.seloger import SeLogerScraper
+# ── Constantes ────────────────────────────────────────────────────────────────
+BIENICI_API = "https://www.bienici.com/realEstateAds.json"
+PAGE_SIZE   = 24        # nb annonces par page (max accepté par l'API)
+MAX_PAGES   = 100       # plafond de sécurité : 100 × 24 = 2 400 annonces max
+                        # (BienIci bloque les offsets > ~2 500 avec HTTP 400)
+PRIX_MAX    = 500_000   # filtre côté API
+ZONE_TOULON = "-35280"  # identifiant BienIci pour Toulon
+PAUSE_PAGES = 0.8       # secondes entre les pages
+BATCH_SIZE  = 500       # taille des lots pour l'upsert Supabase
 
-# ─── URLs de recherche configurées ────────────────────────────────────────────
-# Toulon (83), appartements + maisons, prix max 500 000 €
-
-SEARCH_URLS: dict[str, str] = {
-    "pap": (
-        "https://www.pap.fr/annonce/vente-appartement-maison-toulon-83"
-        "-g43624-jusqu-a-500000-euros"
-    ),
-    # URL navigateur standard (plus résistante aux changements Next.js que /classified-search)
-    "seloger": (
-        "https://www.seloger.com/vente/appartements-maisons/var--83/toulon/"
-        "?prix_max=500000"
-    ),
-    "leboncoin": (
-        "https://www.leboncoin.fr/recherche"
-        "?category=9"
-        "&locations=Toulon__43.125797951705614_5.943649933994845_5849"
-        "&price=min-500000"
-        "&real_estate_type=1,2"
-    ),
-    # Agrégateur majeur (agences + particuliers) — moins bloqué que SeLoger
-    "bienici": (
-        "https://www.bienici.com/recherche/achat/appartement,maison"
-        "/toulon-83000/?prix-max=500000"
-    ),
-    # Portail presse Figaro — généralement moins protégé
-    "figaro": (
-        "https://immobilier.lefigaro.fr/annonces/immobilier-vente"
-        "/toulon-83000.html"
-    ),
+# Mapping propertyType BienIci → libellé français (schéma DVF / Streamlit)
+PROPERTY_TYPE_MAP: dict[str, str] = {
+    "house": "Maison",
+    "flat":  "Appartement",
 }
 
-SCRAPERS: dict[str, type] = {
-    "pap":       PapScraper,
-    "seloger":   SeLogerScraper,
-    "leboncoin": LeboncoinScraper,
-    "bienici":   BienIciScraper,
-    "figaro":    FigaroScraper,
-}
 
-OUTPUT_DIR = Path("data")
+# ── Construction de l'URL API ─────────────────────────────────────────────────
+
+def _build_url(page_from: int) -> str:
+    """Construit l'URL de l'API BienIci avec pagination et filtres Toulon."""
+    filters = {
+        "size":           PAGE_SIZE,
+        "from":           page_from,
+        "filterType":     "buy",
+        "propertyType":   ["house", "flat"],
+        "maxPrice":       PRIX_MAX,
+        "zoneIdsByTypes": {"zoneIds": [ZONE_TOULON]},
+    }
+    return BIENICI_API + "?filters=" + urllib.parse.quote(json.dumps(filters))
 
 
-# ─── Entrée principale ────────────────────────────────────────────────────────
+# ── Requête HTTP ──────────────────────────────────────────────────────────────
 
-def main() -> None:
-    args = _parse_args()
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s  %(levelname)-8s  %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
+def _fetch_page(url: str) -> dict:
+    """Appelle l'API BienIci et retourne le JSON parsé."""
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept":          "application/json, text/plain, */*",
+            "Accept-Language": "fr-FR,fr;q=0.9",
+            "Referer":         "https://www.bienici.com/",
+        },
     )
-    logger = logging.getLogger("scraping.main")
+    with urllib.request.urlopen(req, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
 
-    output_dir = Path(args.output)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
-    sites = list(SCRAPERS.keys()) if args.site == "all" else [args.site]
-    scraped_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+# ── Parsing d'une annonce ─────────────────────────────────────────────────────
 
-    logger.info("=" * 60)
-    logger.info("  SCRAPING IMMOBILIER TOULON — ≤ 500 000 €")
-    logger.info("=" * 60)
-    logger.info(f"  FlareSolverr : {args.flaresolverr}")
-    logger.info(f"  Sites        : {', '.join(sites)}")
-    logger.info(f"  Pages max    : {args.max_pages} (s'arrête dès qu'une page est vide)")
-    logger.info(f"  Sortie       : {output_dir}/annonces.csv  [nom fixe, écrasé à chaque run]")
-    logger.info("=" * 60)
-
-    all_dfs: list[pd.DataFrame] = []
-
+def _to_float(val) -> float | None:
+    """
+    Convertit en float de manière robuste.
+    Gère les cas où l'API BienIci retourne une liste (fourchette de prix)
+    ou une valeur nulle/invalide.
+    """
+    if val is None:
+        return None
+    if isinstance(val, list):
+        val = val[0] if val else None
+    if val is None:
+        return None
     try:
-        with FlareSolverrClient(host=args.flaresolverr) as client:
-            for site in sites:
-                logger.info(f"\n{'─' * 60}")
-                logger.info(f"  {site.upper()}")
-                logger.info(f"{'─' * 60}")
-
-                scraper = SCRAPERS[site](client)
-                url = SEARCH_URLS[site]
-
-                results = scraper.scrape(url, max_pages=args.max_pages, html_dump_dir=args.save_html)
-                df = scraper.to_dataframe()
-
-                # ── Nettoyage par site ─────────────────────────────────────
-                df = _clean(df, logger, site)
-                all_dfs.append(df)
-                logger.info(f"[{site.upper()}] {len(df)} annonces propres récupérées")
-
-    except ConnectionError as exc:
-        logger.error(f"\n❌  {exc}")
-        logger.error(
-            "\n  Conseil : lancez FlareSolverr avec :\n"
-            "    docker-compose up flaresolverr -d\n"
-            "  puis relancez ce script."
-        )
-        sys.exit(1)
-
-    # ─── Fichier combiné — nom fixe lu par le front ───────────────────────────
-    if all_dfs:
-        df_all = pd.concat(all_dfs, ignore_index=True)
-        df_all = _clean(df_all, logger, "all")        # dédup cross-sites
-        df_all = _align_dvf_columns(df_all)           # aligne sur le schéma DVF
-
-        combined_path = output_dir / "annonces.csv"   # nom FIXE — lu par le front
-        df_all.to_csv(combined_path, index=False, encoding="utf-8-sig")
-
-        logger.info(f"\n{'=' * 60}")
-        logger.info("  RÉSUMÉ FINAL")
-        logger.info(f"{'=' * 60}")
-        logger.info(f"  Scraping effectué le : {scraped_at}")
-        logger.info(f"  Total annonces nettes : {len(df_all)}")
-        for source in df_all["source"].unique():
-            n = len(df_all[df_all["source"] == source])
-            prix_med = df_all.loc[df_all["source"] == source, "valeur_fonciere"].median()
-            logger.info(f"    • {source:<12} : {n:>4} annonces  |  prix médian: {prix_med:,.0f} €")
-        logger.info(f"\n  Fichier combiné (front) : {combined_path}")
-        logger.info(f"{'=' * 60}\n")
-    else:
-        logger.warning("Aucune annonce récupérée. Vérifiez FlareSolverr et les URLs.")
+        return float(val)
+    except (TypeError, ValueError):
+        return None
 
 
-# ─── Alignement colonnes DVF ──────────────────────────────────────────────────
-
-def _split_localisation(loc: str) -> tuple[str | None, str | None]:
-    """Extrait (nom_commune, code_postal) depuis 'Toulon (83000)' ou 'Toulon 83000'."""
-    if not isinstance(loc, str) or not loc.strip():
-        return None, None
-    m = re.search(r"^(.+?)\s*\(?\s*(\d{5})\s*\)?$", loc.strip())
-    if m:
-        return m.group(1).strip(), m.group(2)
-    return loc.strip(), None
+def _to_int(val) -> int | None:
+    """Convertit en int via _to_float — gère aussi les listes (ex: roomsQuantity)."""
+    f = _to_float(val)
+    return int(f) if f is not None else None
 
 
-def _align_dvf_columns(df: pd.DataFrame) -> pd.DataFrame:
+def _dpe(val: str | None) -> str | None:
+    """Retourne la lettre DPE/GES (A-G) ou None si invalide / non renseigné."""
+    return val if val and val in "ABCDEFG" else None
+
+
+def _pub_date(val: str | None) -> str | None:
+    """Filtre les dates epoch (1970) renvoyées par BienIci quand la date est inconnue."""
+    return None if not val or val.startswith("1970") else val
+
+
+def _parse_annonce(ad: dict) -> dict | None:
     """
-    Renomme et restructure les colonnes de annonces.csv pour les aligner
-    sur le schéma de dvf_toulon.csv afin de faciliter les analyses croisées.
-
-    Mapping :
-      prix        → valeur_fonciere
-      surface     → surface_reelle_bati
-      nb_pieces   → nombre_pieces_principales
-      type_bien   → type_local
-      date_scraped→ date_mutation
-      localisation→ nom_commune + code_postal + code_departement
-
-    Colonnes DVF sans équivalent scraping ajoutées vides :
-      longitude, latitude
+    Transforme une annonce brute BienIci en ligne prête pour Supabase.
+    Retourne None si l'annonce manque de prix ou de surface.
+    Capture l'ensemble des champs utiles exposés par l'API BienIci.
     """
-    df = df.copy()
+    prix    = _to_float(ad.get("price"))
+    surface = _to_float(ad.get("surfaceArea"))
 
-    # ── Renommages directs ────────────────────────────────────────────────────
-    df = df.rename(columns={
-        "prix":       "valeur_fonciere",
-        "surface":    "surface_reelle_bati",
-        "nb_pieces":  "nombre_pieces_principales",
-        "type_bien":  "type_local",
-        "date_scraped": "date_mutation",
-    })
+    # Annonces sans prix ni surface : inutilisables pour l'analyse
+    if not prix or not surface:
+        return None
 
-    # ── Décomposition de localisation ─────────────────────────────────────────
-    if "localisation" in df.columns:
-        parsed = df["localisation"].map(_split_localisation)
-        df["nom_commune"] = parsed.map(lambda x: x[0])
-        df["code_postal"]  = parsed.map(lambda x: x[1])
-        df["code_departement"] = df["code_postal"].map(
-            lambda cp: cp[:2] if isinstance(cp, str) and len(cp) >= 2 else None
-        )
-        df = df.drop(columns=["localisation"])
+    ad_id = ad.get("id", "")
 
-    # ── Colonnes DVF sans équivalent (laissées vides) ─────────────────────────
-    df["longitude"] = None
-    df["latitude"]  = None
+    # ── Type de bien ──────────────────────────────────────────────────────────
+    raw_type  = ad.get("propertyType", "")
+    type_bien = PROPERTY_TYPE_MAP.get(raw_type, raw_type.capitalize() if raw_type else "Autre")
 
-    # ── Ordre final des colonnes ──────────────────────────────────────────────
-    ordre = [
-        "source",
-        "type_local",
-        "titre",
-        "valeur_fonciere",
-        "surface_reelle_bati",
-        "nombre_pieces_principales",
-        "nom_commune",
-        "code_postal",
-        "code_departement",
-        "longitude",
-        "latitude",
-        "description",
-        "url",
-        "date_mutation",
-    ]
-    # Garde uniquement les colonnes présentes (sécurité)
-    ordre = [c for c in ordre if c in df.columns]
-    df = df[ordre]
+    # ── Source (agence ou particulier) ────────────────────────────────────────
+    source = ad.get("accountDisplayName") or "BienIci"
 
-    return df
+    # ── Localisation — district est un dict, pas une string ──────────────────
+    district = ad.get("district")
+    quartier = (
+        district.get("name") if isinstance(district, dict) else None
+    ) or ad.get("city") or "Toulon"
+
+    # ── Coordonnées GPS (floutées par BienIci au niveau quartier) ─────────────
+    blur = ad.get("blurInfo") or {}
+    pos  = blur.get("position") or {}
+
+    # ── Retourne tous les champs disponibles ──────────────────────────────────
+    return {
+        # ── Identité / base ───────────────────────────────────────────────────
+        "lien":               f"https://www.bienici.com/annonce/{ad_id}",
+        "titre":              ad.get("title") or f"{type_bien} {surface} m² — {quartier}",
+        "prix":               prix,
+        "surface":            surface,
+        "pieces":             _to_int(ad.get("roomsQuantity")),
+        "quartier":           quartier,
+        "type_bien":          type_bien,
+        "source":             source,
+        # ── Détails du bien ───────────────────────────────────────────────────
+        "chambres":           _to_int(ad.get("bedroomsQuantity")),
+        "sdb":                _to_int(ad.get("bathroomsQuantity")),
+        "sde":                _to_int(ad.get("showerRoomsQuantity")),
+        "wc":                 _to_int(ad.get("toiletQuantity")),
+        "etage":              _to_int(ad.get("floor")),
+        "nb_etages":          _to_int(ad.get("floorQuantity")),
+        "annee_construction": _to_int(ad.get("yearOfConstruction")),
+        "neuf":               ad.get("newProperty"),
+        "travaux":            ad.get("workToDo"),
+        # ── Énergie / DPE ─────────────────────────────────────────────────────
+        "dpe":                _dpe(ad.get("energyClassification")),
+        "ges":                _dpe(ad.get("greenhouseGazClassification")),
+        "energie_valeur":     _to_int(ad.get("energyValue")),
+        # ── Équipements (booléens) ────────────────────────────────────────────
+        "ascenseur":          ad.get("hasElevator"),
+        "balcon":             ad.get("hasBalcony"),
+        "terrasse":           ad.get("hasTerrace"),
+        "jardin":             ad.get("hasGarden"),
+        "piscine":            ad.get("hasPool"),
+        "cave":               ad.get("hasCellar"),
+        "parking":            (ad.get("parkingPlacesQuantity") or 0) > 0,
+        "nb_parking":         _to_int(ad.get("parkingPlacesQuantity")),
+        "cheminee":           ad.get("hasFirePlace"),
+        "climatisation":      ad.get("hasAirConditioning"),
+        "vue_degagee":        ad.get("hasUnobstructedView"),
+        "interphone":         ad.get("hasIntercom"),
+        "digicode":           ad.get("hasDoorCode"),
+        "gardien":            ad.get("hasCaretaker"),
+        "pmr":                ad.get("isDisabledPeopleFriendly"),
+        # ── Copropriété ───────────────────────────────────────────────────────
+        "copropriete":        ad.get("isInCondominium"),
+        "nb_lots_copro":      _to_int(ad.get("condominiumPartsQuantity")),
+        "charges_annuelles":  _to_int(ad.get("annualCondominiumFees")),
+        "copro_procedure":    ad.get("isCondominiumInProcedure"),
+        # ── Localisation ──────────────────────────────────────────────────────
+        "latitude":           _to_float(pos.get("lat")),
+        "longitude":          _to_float(pos.get("lng")),
+        "exposition":         ad.get("exposition") or None,
+        # ── Marché ────────────────────────────────────────────────────────────
+        "prix_baisse":        ad.get("priceHasDecreased"),
+        "prix_m2_bienici":    _to_float(ad.get("pricePerSquareMeter")),
+        "type_vendeur":       ad.get("accountType") or None,
+        "date_publication":   _pub_date(ad.get("publicationDate")),
+        # ── Texte ─────────────────────────────────────────────────────────────
+        "description":        ad.get("description") or None,
+    }
 
 
-# ─── Nettoyage post-scraping ──────────────────────────────────────────────────
+# ── Pagination complète ───────────────────────────────────────────────────────
 
-
-# Domaines officiels attendus par scraper — toute URL hors-domaine est rejetée
-# (ex: PAP redirige les programmes neufs vers immoneuf.com)
-_DOMAINE_PAR_SITE: dict[str, str] = {
-    "pap":       "pap.fr",
-    "seloger":   "seloger.com",
-    "leboncoin": "leboncoin.fr",
-    "bienici":   "bienici.com",
-    "figaro":    "lefigaro.fr",
-}
-
-
-def _clean(df: pd.DataFrame, logger, label: str) -> pd.DataFrame:
+def scrape_all() -> list[dict]:
     """
-    Nettoie un DataFrame d'annonces :
-      1. Supprime les doublons par URL
-      2. Filtre les URLs hors-domaine (ex : PAP → immoneuf.com)
-      3. Filtre les prix > PRIX_MAX
-      4. Supprime les annonces sans surface (inutilisables pour l'analyse)
+    Parcourt toutes les pages de l'API BienIci et retourne
+    la liste complète des annonces filtrées.
     """
-    n_avant = len(df)
+    annonces:  list[dict] = []
+    page_from: int        = 0
+    total:     int | None = None
 
-    # 1. Dédoublonnage sur l'URL normalisée (sans query string de pagination)
-    if "url" in df.columns:
-        df = df.drop_duplicates(subset=["url"], keep="first")
-        n_dup = n_avant - len(df)
-        if n_dup:
-            logger.info(f"[{label.upper()}] {n_dup} doublons supprimés (même URL)")
+    logger.info("Démarrage du scraping BienIci (Toulon, ≤ 500 000 €)…")
 
-    # 2. Filtre les URLs hors-domaine (ne s'applique qu'aux passes par-site, pas "all")
-    domaine_attendu = _DOMAINE_PAR_SITE.get(label)
-    if domaine_attendu and "url" in df.columns:
-        masque_domaine = df["url"].isna() | df["url"].str.contains(domaine_attendu, na=False)
-        n_hors_domaine = (~masque_domaine).sum()
-        df = df[masque_domaine]
-        if n_hors_domaine:
-            logger.info(
-                f"[{label.upper()}] {n_hors_domaine} annonces hors-domaine supprimees "
-                f"(URL hors '{domaine_attendu}' - ex: redirections partenaires)"
-            )
+    for page in range(MAX_PAGES):
+        page_from = page * PAGE_SIZE
+        url = _build_url(page_from)
 
-    # 3. Filtre prix > 500 000 €
-    if "prix" in df.columns:
-        masque_prix = df["prix"].isna() | (df["prix"] <= PRIX_MAX)
-        n_hors_budget = (~masque_prix).sum()
-        df = df[masque_prix]
-        if n_hors_budget:
-            logger.info(f"[{label.upper()}] {n_hors_budget} annonces > {PRIX_MAX:,} € supprimées")
-
-    # 4. Supprime les annonces sans surface (inutilisables pour l'analyse immobilière)
-    if "surface" in df.columns:
-        masque_sans_surface = df["surface"].isna()
-        n_sans_surface = masque_sans_surface.sum()
-        df = df[~masque_sans_surface]
-        if n_sans_surface:
-            logger.info(f"[{label.upper()}] {n_sans_surface} annonces sans surface supprimées")
-
-    # 5. Filtre ville : garde uniquement Toulon
-    for col in ("localisation", "nom_commune"):
-        if col in df.columns:
-            masque_toulon = df[col].str.contains("toulon", case=False, na=False)
-            n_hors_ville = (~masque_toulon).sum()
-            df = df[masque_toulon]
-            if n_hors_ville:
+        try:
+            data = _fetch_page(url)
+        except urllib.error.HTTPError as e:
+            if e.code == 400:
+                # Limite de pagination BienIci atteinte — on sort proprement
                 logger.info(
-                    f"[{label.upper()}] {n_hors_ville} annonces hors-Toulon supprimées"
+                    f"  ⚠️  HTTP 400 à la page {page + 1} (offset {page_from}) "
+                    f"— {len(annonces)} annonces collectées."
                 )
+            else:
+                logger.warning(f"  ⚠️  HTTP {e.code} page {page + 1} : {e}")
+            break
+        except Exception as exc:
+            logger.warning(f"  ⚠️  Erreur page {page + 1} : {exc}")
             break
 
-    return df.reset_index(drop=True)
+        ads = data.get("realEstateAds", [])
+
+        # Première page : affiche le total déclaré par l'API
+        if page == 0:
+            total    = data.get("total", 0)
+            logger.info(f"  → {total} annonces déclarées sur BienIci")
+
+        if not ads:
+            logger.info(f"  Page {page + 1} vide — fin de pagination.")
+            break
+
+        for ad in ads:
+            parsed = _parse_annonce(ad)
+            if parsed:
+                annonces.append(parsed)
+
+        logger.info(
+            f"  Page {page + 1}/{MAX_PAGES}"
+            f" | {len(ads)} reçues"
+            f" | {len(annonces)} valides cumulées"
+        )
+
+        time.sleep(PAUSE_PAGES)
+
+    logger.info(f"\n  ✅ Scraping terminé — {len(annonces)} annonces récupérées")
+    return annonces
 
 
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Scraping immobilier Toulon via FlareSolverr",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__,
-    )
-    parser.add_argument(
-        "--max-pages",
-        type=int,
-        default=MAX_PAGES_DEFAULT,
-        metavar="N",
-        help=f"Nombre max de pages par site (défaut: {MAX_PAGES_DEFAULT}, s'arrête dès qu'une page est vide)",
-    )
-    parser.add_argument(
-        "--site",
-        choices=[*SCRAPERS.keys(), "all"],
-        default="all",
-        help="Site a scraper : pap | seloger | leboncoin | bienici | figaro | all (defaut: all)",
-    )
-    parser.add_argument(
-        "--flaresolverr",
-        default="http://localhost:8191",
-        metavar="URL",
-        help="URL de FlareSolverr (défaut: http://localhost:8191)",
-    )
-    parser.add_argument(
-        "--output",
-        default=str(OUTPUT_DIR),
-        metavar="DIR",
-        help=f"Dossier de sortie (défaut: {OUTPUT_DIR})",
-    )
-    parser.add_argument(
-        "--save-html",
-        default=None,
-        metavar="DIR",
-        help=(
-            "Sauvegarde le HTML brut de chaque page dans DIR (ex: debug_html/). "
-            "Utile pour déboguer quand un site change de structure. "
-            "Exemple : --save-html debug_html"
-        ),
-    )
-    return parser.parse_args()
+# ── Upsert Supabase ───────────────────────────────────────────────────────────
+
+def push_to_supabase(annonces: list[dict]) -> None:
+    """
+    Upsert par lots vers la table `annonces` de Supabase.
+    Si un lien existe déjà, la ligne est mise à jour (prix, surface, etc.).
+    """
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+
+    if not supabase_url or not supabase_key:
+        raise EnvironmentError(
+            "Variables SUPABASE_URL et SUPABASE_KEY manquantes.\n"
+            "Définissez-les en variables d'env ou dans les secrets GitHub Actions."
+        )
+
+    client       = create_client(supabase_url, supabase_key)
+    total_pushed = 0
+
+    for i in range(0, len(annonces), BATCH_SIZE):
+        batch = annonces[i : i + BATCH_SIZE]
+        client.table("annonces").upsert(batch, on_conflict="lien").execute()
+        total_pushed += len(batch)
+        logger.info(f"  Supabase upsert : {total_pushed}/{len(annonces)}")
+
+    logger.info(f"  ✅ {total_pushed} annonces synchronisées dans Supabase")
+
+
+# ── Point d'entrée ────────────────────────────────────────────────────────────
+
+def main() -> None:
+    logger.info("=" * 60)
+    logger.info("  SCRAPING BIENICI → SUPABASE")
+    logger.info(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
+
+    # 1. Scraping complet avec pagination
+    annonces = scrape_all()
+
+    if not annonces:
+        logger.warning("Aucune annonce récupérée — vérifiez l'API BienIci.")
+        sys.exit(1)
+
+    # 2. Push vers Supabase
+    push_to_supabase(annonces)
+
+    # 3. Résumé final
+    types: dict[str, int] = {}
+    for a in annonces:
+        types[a["type_bien"]] = types.get(a["type_bien"], 0) + 1
+
+    logger.info("\n" + "=" * 60)
+    logger.info("  RÉSUMÉ")
+    logger.info(f"  Total synchronisé : {len(annonces)} annonces")
+    for t, n in sorted(types.items()):
+        logger.info(f"    • {t:<15} : {n:>4}")
+    logger.info("=" * 60)
 
 
 if __name__ == "__main__":

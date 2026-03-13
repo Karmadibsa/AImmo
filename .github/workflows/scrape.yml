@@ -5,6 +5,7 @@ on:
   schedule:
     - cron: "0 7,13,19 * * *"  # 3×/jour : 7h, 13h, 19h UTC (9h/15h/21h Paris)
   workflow_dispatch:             # déclenchement manuel depuis l'onglet Actions
+                                 # → sélectionner la branche dans le menu déroulant
 
 # ─── Permissions ────────────────────────────────────────────────────────────────
 # Plus de git push → plus besoin de contents: write
@@ -19,13 +20,9 @@ jobs:
     timeout-minutes: 15          # BienIci API est rapide, 15 min largement suffisant
 
     steps:
-      # ── 1. Checkout de la branche de travail (code à jour) ─────────────────────
-      # Le workflow est sur main (pour être visible dans Actions),
-      # mais le code scraping est sur mise-a-jour-scraper.
+      # ── 1. Checkout ────────────────────────────────────────────────────────────
       - name: "📥 Checkout"
         uses: actions/checkout@v4
-        with:
-          ref: mise-a-jour-scraper
 
       # ── 2. Python 3.11 ─────────────────────────────────────────────────────────
       - name: "🐍 Setup Python 3.11"

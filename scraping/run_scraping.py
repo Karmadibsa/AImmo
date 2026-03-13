@@ -38,9 +38,11 @@ logger = logging.getLogger("scraping.bienici")
 # ── Constantes ────────────────────────────────────────────────────────────────
 BIENICI_API = "https://www.bienici.com/realEstateAds.json"
 PAGE_SIZE   = 24        # nb annonces par page (max accepté par l'API)
+MAX_PAGES   = 100       # plafond de sécurité : 100 × 24 = 2 400 annonces max
+                        # (BienIci bloque les offsets > ~2 500 avec HTTP 400)
 PRIX_MAX    = 500_000   # filtre côté API
 ZONE_TOULON = "-35280"  # identifiant BienIci pour Toulon
-PAUSE_PAGES = 1.5       # secondes entre les pages (respect de l'API)
+PAUSE_PAGES = 0.8       # secondes entre les pages
 BATCH_SIZE  = 500       # taille des lots pour l'upsert Supabase
 
 # Mapping propertyType BienIci → libellé français (schéma DVF / Streamlit)
@@ -163,30 +165,35 @@ def scrape_all() -> list[dict]:
 
     logger.info("Démarrage du scraping BienIci (Toulon, ≤ 500 000 €)…")
 
-    while True:
+    for page in range(MAX_PAGES):
+        page_from = page * PAGE_SIZE
         url = _build_url(page_from)
 
         try:
             data = _fetch_page(url)
         except urllib.error.HTTPError as e:
             if e.code == 400:
-                # BienIci limite l'offset à ~2 500 résultats : on s'arrête proprement
+                # Limite de pagination BienIci atteinte — on sort proprement
                 logger.info(
-                    f"  ⚠️  Limite de pagination BienIci atteinte à l'offset {page_from} "
-                    f"(HTTP 400) — {len(annonces)} annonces collectées au total."
+                    f"  ⚠️  HTTP 400 à la page {page + 1} (offset {page_from}) "
+                    f"— {len(annonces)} annonces collectées."
                 )
-                break
-            raise  # autres codes HTTP (403, 500…) → on laisse remonter
+            else:
+                logger.warning(f"  ⚠️  HTTP {e.code} page {page + 1} : {e}")
+            break
+        except Exception as exc:
+            logger.warning(f"  ⚠️  Erreur page {page + 1} : {exc}")
+            break
 
         ads = data.get("realEstateAds", [])
 
-        # Premier appel : on lit le total déclaré par l'API
-        if total is None:
+        # Première page : affiche le total déclaré par l'API
+        if page == 0:
             total    = data.get("total", 0)
-            nb_pages = (total // PAGE_SIZE) + (1 if total % PAGE_SIZE else 0)
-            logger.info(f"  → {total} annonces déclarées (~{nb_pages} pages max)")
+            logger.info(f"  → {total} annonces déclarées sur BienIci")
 
         if not ads:
+            logger.info(f"  Page {page + 1} vide — fin de pagination.")
             break
 
         for ad in ads:
@@ -195,14 +202,10 @@ def scrape_all() -> list[dict]:
                 annonces.append(parsed)
 
         logger.info(
-            f"  Page {page_from // PAGE_SIZE + 1}"
+            f"  Page {page + 1}/{MAX_PAGES}"
             f" | {len(ads)} reçues"
             f" | {len(annonces)} valides cumulées"
         )
-
-        page_from += PAGE_SIZE
-        if page_from >= (total or 0):
-            break
 
         time.sleep(PAUSE_PAGES)
 

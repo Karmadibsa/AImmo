@@ -304,12 +304,25 @@ def scrape_all() -> list[dict]:
     return annonces
 
 
-# ── Upsert Supabase ───────────────────────────────────────────────────────────
+# ── Push Supabase (stratégie hybride) ────────────────────────────────────────
+
+# Seuil de sécurité : on n'écrase la table QUE si le scraping a retourné
+# au moins MIN_ANNONCES annonces valides (évite de vider la base si l'API
+# plante ou retourne un résultat vide/tronqué).
+MIN_ANNONCES = 20
+
 
 def push_to_supabase(annonces: list[dict]) -> None:
     """
-    Upsert par lots vers la table `annonces` de Supabase.
-    Si un lien existe déjà, la ligne est mise à jour (prix, surface, etc.).
+    Stratégie hybride :
+      1. Le scraping est déjà terminé et stocké en mémoire (annonces).
+      2. Si le nombre d'annonces >= MIN_ANNONCES → on vide la table Supabase
+         puis on insère toutes les nouvelles annonces (dataset 100 % propre).
+      3. Si trop peu d'annonces → on n'écrase rien et on quitte en erreur.
+
+    Avantages :
+      - Pas de données zombies (viager, off-market périmés, etc.)
+      - Sûr : la table n'est vidée QUE si le scraping a réussi
     """
     supabase_url = os.getenv("SUPABASE_URL")
     supabase_key = os.getenv("SUPABASE_KEY")
@@ -320,16 +333,33 @@ def push_to_supabase(annonces: list[dict]) -> None:
             "Définissez-les en variables d'env ou dans les secrets GitHub Actions."
         )
 
-    client       = create_client(supabase_url, supabase_key)
-    total_pushed = 0
+    client = create_client(supabase_url, supabase_key)
 
+    # ── Garde de sécurité ────────────────────────────────────────────────────
+    if len(annonces) < MIN_ANNONCES:
+        logger.warning(
+            f"  ⚠️  Seulement {len(annonces)} annonces récupérées "
+            f"(seuil minimum : {MIN_ANNONCES}). "
+            "Table Supabase non modifiée pour protéger les données existantes."
+        )
+        sys.exit(1)
+
+    # ── Étape 1 : Vider la table ─────────────────────────────────────────────
+    # On supprime toutes les lignes (filtre générique : lien != chaîne vide,
+    # ce qui couvre 100 % des vraies annonces).
+    logger.info(f"  🗑️  Suppression de l'ancienne table ({len(annonces)} nouvelles annonces prêtes)…")
+    client.table("annonces").delete().neq("lien", "").execute()
+    logger.info("  ✅ Table vidée")
+
+    # ── Étape 2 : Insérer le nouveau dataset ─────────────────────────────────
+    total_pushed = 0
     for i in range(0, len(annonces), BATCH_SIZE):
         batch = annonces[i : i + BATCH_SIZE]
-        client.table("annonces").upsert(batch, on_conflict="lien").execute()
+        client.table("annonces").insert(batch).execute()
         total_pushed += len(batch)
-        logger.info(f"  Supabase upsert : {total_pushed}/{len(annonces)}")
+        logger.info(f"  Supabase insert : {total_pushed}/{len(annonces)}")
 
-    logger.info(f"  ✅ {total_pushed} annonces synchronisées dans Supabase")
+    logger.info(f"  ✅ {total_pushed} annonces insérées dans Supabase")
 
 
 # ── Point d'entrée ────────────────────────────────────────────────────────────

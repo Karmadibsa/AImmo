@@ -252,7 +252,9 @@ def scrape_all() -> list[dict]:
     Parcourt toutes les pages de l'API BienIci et retourne
     la liste complète des annonces filtrées.
     """
-    annonces:  list[dict] = []
+    # Dict lien→annonce pour déduplication en temps réel
+    # (BienIci peut retourner la même annonce sur plusieurs pages)
+    annonces_map: dict[str, dict] = {}
     page_from: int        = 0
     total:     int | None = None
 
@@ -269,7 +271,7 @@ def scrape_all() -> list[dict]:
                 # Limite de pagination BienIci atteinte — on sort proprement
                 logger.info(
                     f"  ⚠️  HTTP 400 à la page {page + 1} (offset {page_from}) "
-                    f"— {len(annonces)} annonces collectées."
+                    f"— {len(annonces_map)} annonces collectées."
                 )
             else:
                 logger.warning(f"  ⚠️  HTTP {e.code} page {page + 1} : {e}")
@@ -292,17 +294,18 @@ def scrape_all() -> list[dict]:
         for ad in ads:
             parsed = _parse_annonce(ad)
             if parsed:
-                annonces.append(parsed)
+                annonces_map[parsed["lien"]] = parsed  # dedup par lien
 
         logger.info(
             f"  Page {page + 1}/{MAX_PAGES}"
             f" | {len(ads)} reçues"
-            f" | {len(annonces)} valides cumulées"
+            f" | {len(annonces_map)} valides cumulées"
         )
 
         time.sleep(PAUSE_PAGES)
 
-    logger.info(f"\n  ✅ Scraping terminé — {len(annonces)} annonces récupérées")
+    annonces = list(annonces_map.values())
+    logger.info(f"\n  ✅ Scraping terminé — {len(annonces)} annonces uniques récupérées")
     return annonces
 
 

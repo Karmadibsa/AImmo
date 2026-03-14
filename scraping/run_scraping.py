@@ -63,6 +63,7 @@ def _build_url(page_from: int) -> str:
         "propertyType":   ["house", "flat"],
         "maxPrice":       PRIX_MAX,
         "zoneIdsByTypes": {"zoneIds": [ZONE_TOULON]},
+        "onTheMarket":    [True],   # annonces actives uniquement (évite les archives)
     }
     return BIENICI_API + "?filters=" + urllib.parse.quote(json.dumps(filters))
 
@@ -127,10 +128,6 @@ def _pub_date(val: str | None) -> str | None:
 # Prix minimum réaliste pour une transaction immobilière
 PRIX_MIN = 10_000
 
-# ── Compteurs de debug (temporaires) ──────────────────────────────────────────
-_debug = {"total": 0, "on_the_market": 0, "viager": 0, "prix_surface": 0}
-
-
 def _parse_annonce(ad: dict) -> dict | None:
     """
     Transforme une annonce brute BienIci en ligne prête pour Supabase.
@@ -139,20 +136,16 @@ def _parse_annonce(ad: dict) -> dict | None:
       - viager avec rente mensuelle (lifeAnnuityMonthlyAllowance > 0)
       - prix < 10 000 € (données corrompues / test)
       - prix ou surface manquants
+    Note : le filtre onTheMarket est aussi appliqué côté API (_build_url),
+    ce garde Python sert de filet de sécurité.
     """
-    _debug["total"] += 1
-
     # ── 1. Annonces hors-marché (expirées, vendues, retirées) ─────────────────
-    # On utilise `is False` (pas `not`) pour ne filtrer QUE les False explicites.
-    # Si onTheMarket vaut None ou est absent → annonce conservée.
     status = ad.get("status") or {}
     if status.get("onTheMarket") is False:
-        _debug["on_the_market"] += 1
         return None
 
     # ── 2. Viager avec rente mensuelle — prix = rente, pas valeur réelle ──────
     if (ad.get("lifeAnnuityMonthlyAllowance") or 0) > 0:
-        _debug["viager"] += 1
         return None
 
     prix    = _to_float(ad.get("price"))
@@ -160,7 +153,6 @@ def _parse_annonce(ad: dict) -> dict | None:
 
     # ── 3. Prix ou surface manquants / prix irréaliste ────────────────────────
     if not prix or not surface or prix < PRIX_MIN:
-        _debug["prix_surface"] += 1
         return None
 
     ad_id = ad.get("id", "")
@@ -288,18 +280,10 @@ def scrape_all() -> list[dict]:
 
         ads = data.get("realEstateAds", [])
 
-        # Première page : affiche le total déclaré par l'API + structure brute
+        # Première page : affiche le total déclaré par l'API
         if page == 0:
             total = data.get("total", 0)
             logger.info(f"  → {total} annonces déclarées sur BienIci")
-            if ads:
-                ad0 = ads[0]
-                logger.info(f"  [DEBUG] Champs ad[0]: {list(ad0.keys())}")
-                logger.info(f"  [DEBUG] status       : {ad0.get('status')}")
-                logger.info(f"  [DEBUG] price        : {ad0.get('price')}")
-                logger.info(f"  [DEBUG] surfaceArea  : {ad0.get('surfaceArea')}")
-                logger.info(f"  [DEBUG] propertyType : {ad0.get('propertyType')}")
-                logger.info(f"  [DEBUG] lifeAnnuity  : {ad0.get('lifeAnnuityMonthlyAllowance')}")
 
         if not ads:
             logger.info(f"  Page {page + 1} vide — fin de pagination.")
@@ -319,12 +303,6 @@ def scrape_all() -> list[dict]:
         time.sleep(PAUSE_PAGES)
 
     logger.info(f"\n  ✅ Scraping terminé — {len(annonces)} annonces récupérées")
-    logger.info(
-        f"  [DEBUG] Filtres — total reçues: {_debug['total']} | "
-        f"hors-marché: {_debug['on_the_market']} | "
-        f"viager: {_debug['viager']} | "
-        f"prix/surface manquants: {_debug['prix_surface']}"
-    )
     return annonces
 
 

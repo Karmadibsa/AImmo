@@ -138,8 +138,10 @@ def _parse_annonce(ad: dict) -> dict | None:
       - prix ou surface manquants
     """
     # ── 1. Annonces hors-marché (expirées, vendues, retirées) ─────────────────
+    # On utilise `is False` (pas `not`) pour ne filtrer QUE les False explicites.
+    # Si onTheMarket vaut None ou est absent → annonce conservée.
     status = ad.get("status") or {}
-    if not status.get("onTheMarket", True):
+    if status.get("onTheMarket") is False:
         return None
 
     # ── 2. Viager avec rente mensuelle — prix = rente, pas valeur réelle ──────

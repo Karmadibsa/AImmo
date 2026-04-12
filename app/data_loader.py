@@ -122,6 +122,31 @@ def _process(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# ── Données DVF brutes (pour analyses de tendance) ───────────────────────────
+
+@st.cache_data(ttl=3600)
+def load_dvf_raw(dvf_csv_path: str = str(DVF_CSV_PATH)) -> pd.DataFrame:
+    """
+    Charge le fichier DVF brut filtré sur 2024-2025 pour les graphes de tendance.
+
+    Retourne un DataFrame avec au minimum :
+        date_mutation, type_local, valeur_fonciere, surface_reelle_bati,
+        prix_m2, nature_mutation.
+
+    En cas d'erreur (fichier absent, colonnes manquantes), retourne un DataFrame vide.
+    """
+    try:
+        df = pd.read_csv(dvf_csv_path)
+        for col in ("valeur_fonciere", "surface_reelle_bati"):
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        df["date_mutation"] = pd.to_datetime(df["date_mutation"], errors="coerce")
+        df = df[df["date_mutation"] >= "2024-01-01"].copy()
+        df["prix_m2"] = df["valeur_fonciere"] / df["surface_reelle_bati"]
+        return df
+    except Exception:
+        return pd.DataFrame()
+
+
 # ── Modèles DVF dynamiques ────────────────────────────────────────────────────
 
 @st.cache_data(ttl=300)

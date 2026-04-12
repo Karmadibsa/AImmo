@@ -14,7 +14,7 @@ from analysis.regression import (
 )
 from assets.style import inject_css
 from config import DVF_CSV_PATH
-from data_loader import get_dvf_models, load_data
+from data_loader import get_dvf_models, load_data, load_dvf_raw
 from ui.tab_analysis import render_analysis
 from ui.tab_assistant import render_assistant
 from ui.tab_list import render_list
@@ -32,6 +32,7 @@ inject_css()
 # ── Données ────────────────────────────────────────────────────────────────────
 df_raw     = load_data()
 dvf_models = get_dvf_models(str(DVF_CSV_PATH))
+df_dvf_raw = load_dvf_raw(str(DVF_CSV_PATH))
 
 # ── Session state — Assistant ──────────────────────────────────────────────────
 for _k, _v in [("asst_step", 0), ("asst_type", None),
@@ -171,7 +172,7 @@ tab_analyse, tab_liste, tab_opps, tab_asst = st.tabs([
 ])
 
 with tab_analyse:
-    render_analysis(df)
+    render_analysis(df, df_dvf_raw)
 
 with tab_liste:
     render_list(df)

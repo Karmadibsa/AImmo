@@ -27,7 +27,7 @@ def _std(xs: list) -> float:
     return math.sqrt(sum((x - m) ** 2 for x in xs) / len(xs))
 
 
-def render_analysis(df: pd.DataFrame) -> None:
+def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> None:
     col_l, col_r = st.columns(2, gap="medium")
 
     # ── 1. Types de biens (Pie) ──────────────────────────────────────────────
@@ -301,3 +301,46 @@ def render_analysis(df: pd.DataFrame) -> None:
         st.info("Colonne quartier absente ou données insuffisantes.")
 
     st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── 7. Tendances du marché — Prix/m² médian mensuel (DVF 2024-2025) ──────
+    if df_dvf is not None and not df_dvf.empty:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown("#### 📈 Tendances du marché — Prix/m² médian mensuel (DVF 2024-2025)")
+
+        _trend = df_dvf[
+            df_dvf["type_local"].isin(["Appartement", "Maison"])
+            & (df_dvf.get("nature_mutation", pd.Series(["Vente"] * len(df_dvf))) == "Vente")
+            & (df_dvf["surface_reelle_bati"].fillna(0) > 9)
+            & (df_dvf["prix_m2"].notna())
+            & (df_dvf["prix_m2"] > 500)
+        ].copy()
+
+        if not _trend.empty and "date_mutation" in _trend.columns:
+            _trend["mois"] = _trend["date_mutation"].dt.to_period("M").astype(str)
+            _agg = (
+                _trend.groupby(["mois", "type_local"])["prix_m2"]
+                .median()
+                .reset_index()
+                .rename(columns={"prix_m2": "Prix/m² médian", "type_local": "Type"})
+                .sort_values("mois")
+            )
+            fig_trend = px.line(
+                _agg, x="mois", y="Prix/m² médian", color="Type",
+                color_discrete_map={"Appartement": "#E8714A", "Maison": "#1B2B4B"},
+                markers=True,
+                labels={"mois": "Mois", "Prix/m² médian": "€/m² médian"},
+                template="simple_white",
+            )
+            fig_trend.update_layout(
+                height=300, margin=dict(t=10, b=10, l=0, r=0),
+                paper_bgcolor="white", plot_bgcolor="white",
+                legend=dict(orientation="h", yanchor="bottom", y=1, xanchor="right", x=1),
+                legend_title_text="",
+                xaxis=dict(tickangle=-45),
+            )
+            fig_trend.update_yaxes(tickformat=",.0f", ticksuffix=" €/m²")
+            st.plotly_chart(fig_trend, use_container_width=True)
+        else:
+            st.info("Données DVF insuffisantes pour calculer les tendances.")
+
+        st.markdown('</div>', unsafe_allow_html=True)

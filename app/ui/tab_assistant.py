@@ -15,6 +15,17 @@ def _usr(text: str) -> None:
 
 
 def render_assistant(df_scored: pd.DataFrame) -> None:
+    # ── Bandeau Phase 2 ──────────────────────────────────────────────────────
+    st.info(
+        "🚧 **Phase 2 — NidBot IA (à venir)** : "
+        "La prochaine phase du projet intégrera un conseiller conversationnel "
+        "basé sur l'IA (LLM), disponible 24h/24, capable d'argumenter ses "
+        "recommandations et de générer des rapports PDF personnalisés. "
+        "L'assistant ci-dessous est la version **Projet 1** : guidage rule-based "
+        "par critères, sans intelligence artificielle."
+    )
+    st.markdown("---")
+
     _, center, _ = st.columns([1, 3, 1])
 
     with center:

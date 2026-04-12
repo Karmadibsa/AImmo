@@ -29,25 +29,41 @@ L'équipe est composée d'experts aux profils complémentaires pour mener à bie
 ```text
 .
 ├── analysis/
-│   ├── stats.py          <- Fonctions statistiques from scratch
-│   ├── regression.py     <- Régression linéaire from scratch
-│   └── scoring.py        <- Score d'opportunité par bien
+│   ├── stats.py          <- Fonctions statistiques from scratch (Grus ch.5)
+│   ├── regression.py     <- Régression linéaire from scratch (Grus ch.14)
+│   └── scoring.py        <- Score et classification d'opportunités from scratch
 ├── app/
-│   └── streamlit_app.py  <- Dashboard principal
+│   ├── streamlit_app.py  <- Dashboard principal (point d'entrée)
+│   ├── config.py         <- Constantes globales (chemins, filtres, tags NLP)
+│   ├── data_loader.py    <- Chargement Supabase / CSV + modèles DVF dynamiques
+│   ├── analysis/
+│   │   └── regression.py <- Régressions (OLS, DVF, multivariée, quartier)
+│   ├── assets/
+│   │   └── style.py      <- CSS personnalisé (sidebar, tabs, composants)
+│   └── ui/
+│       ├── tab_analysis.py     <- Onglet Marché (graphiques + tendances)
+│       ├── tab_list.py         <- Onglet Liste des biens
+│       ├── tab_opportunities.py <- Onglet Opportunités (scoring DVF / quartier)
+│       ├── tab_assistant.py    <- Onglet Assistant (wizard P1 / NidBot P2)
+│       └── components.py       <- Composants réutilisables (badges, tags)
+├── scraping/
+│   └── run_scraping.py   <- Scraping BienIci → Supabase (GitHub Actions)
 ├── data/
-│   ├── dvf_toulon.csv    <- Données DVF
-│   └── annonces.csv      <- Annonces réelles collectées
+│   ├── dvf_toulon.csv    <- Transactions DVF Toulon 2024-2025 (DGFiP)
+│   └── annonces.csv      <- Annonces de fallback local (dev / hors-ligne)
 ├── tests/
-│   ├── test_stats.py     <- Tests unitaires pour stats.py
-│   ├── test_regression.py <- Tests unitaires pour regression.py
-│   └── test_auto_eval.py <- Tests d'évaluation CI (ne pas modifier)
+│   ├── test_stats.py       <- Tests unitaires stats.py
+│   ├── test_regression.py  <- Tests unitaires regression.py
+│   ├── test_scoring.py     <- Tests unitaires scoring.py
+│   └── test_auto_eval.py   <- Évaluation CI automatique (ne pas modifier)
 ├── docs/
-│   ├── REGLES.md     <- Règles du projet
-├── presentation/
-│   ├── presentation.pptx <- Présentation du projet
-│   └── rapport.pdf <- Rapport du projet
+│   └── REGLES.md         <- Standards de développement et Git du projet
+├── presentation/         <- Supports de soutenance (vidéo, slides)
+├── .github/workflows/
+│   ├── eval.yml          <- CI évaluation automatique (55 pts)
+│   └── scrape.yml        <- Scraping quotidien automatique
 ├── requirements.txt
-└── README.md             <- Documentation du projet
+└── README.md
 ```
 
 ## Prérequis et Installation

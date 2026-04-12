@@ -66,7 +66,7 @@ def render_opportunities(
         <div class="section-card" style="border-top:3px solid #8B5CF6;">
         <strong>📚 Référence DVF historique</strong> — Prix comparé à
         <strong>{_n_app + _n_mais:,} ventes réelles</strong> enregistrées à Toulon
-        (DVF 2023-2025, source DGFiP).<br>
+        (DVF 2024-2025, source DGFiP).<br>
         Modèles : Appartement = <b>{_sl_app:,.0f} €/m²</b> (n={_n_app:,}, R²={_r2_app})
         &nbsp;|&nbsp; Maison = <b>{_sl_mais:,.0f} €/m²</b> (n={_n_mais:,}, R²={_r2_mais})<br>
         </div>

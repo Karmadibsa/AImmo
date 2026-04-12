@@ -26,6 +26,10 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
     background: #1B2B4B !important;
     color: #CBD5E1 !important;
 }
+/* Catch-all : tout élément texte dans la sidebar hérite du texte clair */
+[data-testid="stSidebar"] * {
+    color: var(--text-color, #CBD5E1);
+}
 [data-testid="stSidebar"] div,
 [data-testid="stSidebar"] span,
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,

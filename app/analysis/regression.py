@@ -2,33 +2,47 @@
 Fonctions de régression linéaire pour l'analyse immobilière.
 
 Aucune dépendance Streamlit — 100 % testable avec pytest sans lancer l'UI.
+IMPORTANT : pur Python (listes, boucles) — pas de numpy ni sklearn.
 """
 from __future__ import annotations
 
-import numpy as np
+import math
 import pandas as pd
 
 from config import DVF_REGRESSION
 
 
-# ── Primitives OLS ───────────────────────────────────────────────────────────────
+# ── Primitives OLS (from scratch — pur Python) ──────────────────────────────────
 
-def least_squares_fit(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:
+def least_squares_fit(x: list, y: list) -> tuple[float, float]:
     """Régression OLS univariée y ~ x.  Retourne (slope, intercept)."""
-    x_mean, y_mean = x.mean(), y.mean()
-    denom = float(((x - x_mean) ** 2).sum())
+    n = len(x)
+    x_mean = sum(x) / n
+    y_mean = sum(y) / n
+    denom = sum((xi - x_mean) ** 2 for xi in x)
     if denom == 0:
-        return 0.0, float(y_mean)
-    slope     = float(((x - x_mean) * (y - y_mean)).sum() / denom)
-    intercept = float(y_mean - slope * x_mean)
+        return 0.0, y_mean
+    slope     = sum((xi - x_mean) * (yi - y_mean) for xi, yi in zip(x, y)) / denom
+    intercept = y_mean - slope * x_mean
     return slope, intercept
 
 
-def r_squared(x: np.ndarray, y: np.ndarray, slope: float, intercept: float) -> float:
-    """Coefficient de détermination R² = 1 − SS_res / SS_tot."""
-    y_pred = slope * x + intercept
-    ss_res = float(((y - y_pred) ** 2).sum())
-    ss_tot = float(((y - y.mean()) ** 2).sum())
+def r_squared(x: list, y: list, slope: float, intercept: float) -> float:
+    """
+    Coefficient de détermination R² = 1 − SS_res / SS_tot.
+    Robuste aux NaN : filtre automatiquement les paires invalides.
+    """
+    pairs = [
+        (xi, yi) for xi, yi in zip(x, y)
+        if xi is not None and yi is not None
+        and not math.isnan(float(xi)) and not math.isnan(float(yi))
+    ]
+    if len(pairs) < 2:
+        return 0.0
+    xs, ys = [p[0] for p in pairs], [p[1] for p in pairs]
+    y_mean = sum(ys) / len(ys)
+    ss_res = sum((yi - (slope * xi + intercept)) ** 2 for xi, yi in zip(xs, ys))
+    ss_tot = sum((yi - y_mean) ** 2 for yi in ys)
     return 0.0 if ss_tot == 0 else 1.0 - ss_res / ss_tot
 
 

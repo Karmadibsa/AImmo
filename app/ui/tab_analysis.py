@@ -1,9 +1,30 @@
 """Onglet 1 — Analyse de marché (graphiques)."""
 
+import math
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
+
+# ── Stats from scratch (pas de numpy) ─────────────────────────────────────────
+
+def _mean(xs: list) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
+
+def _median(xs: list) -> float:
+    s = sorted(xs)
+    n = len(s)
+    if n == 0:
+        return 0.0
+    mid = n // 2
+    return s[mid] if n % 2 != 0 else (s[mid - 1] + s[mid]) / 2
+
+def _std(xs: list) -> float:
+    if len(xs) < 2:
+        return 0.0
+    m = _mean(xs)
+    return math.sqrt(sum((x - m) ** 2 for x in xs) / len(xs))
 
 
 def render_analysis(df: pd.DataFrame) -> None:
@@ -238,5 +259,45 @@ def render_analysis(df: pd.DataFrame) -> None:
             st.plotly_chart(fig_mv, use_container_width=True)
         except Exception as exc:
             st.warning(f"Régression multivariée non disponible : {exc}")
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── 6. Stats par quartier (Moyenne / Médiane / Écart-type) ───────────────
+    st.markdown('<div class="section-card">', unsafe_allow_html=True)
+    st.markdown("#### 📍 Statistiques par quartier")
+
+    col_qrt = "nom_commune" if "nom_commune" in df.columns else None
+    df_valid = df.dropna(subset=["prix_m2", col_qrt]) if col_qrt else pd.DataFrame()
+
+    if col_qrt and not df_valid.empty:
+        rows = []
+        for quartier, grp in df_valid.groupby(col_qrt):
+            pm2 = [float(v) for v in grp["prix_m2"].tolist() if v == v]  # exclut NaN
+            if len(pm2) < 2:
+                continue
+            rows.append({
+                "Quartier":          quartier,
+                "N":                 len(pm2),
+                "Moyenne €/m²":      round(_mean(pm2)),
+                "Médiane €/m²":      round(_median(pm2)),
+                "Écart-type €/m²":   round(_std(pm2)),
+            })
+
+        if rows:
+            df_stats = pd.DataFrame(rows).sort_values("Médiane €/m²", ascending=False)
+            st.dataframe(
+                df_stats,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Moyenne €/m²":      st.column_config.NumberColumn(format="%d €/m²"),
+                    "Médiane €/m²":      st.column_config.NumberColumn(format="%d €/m²"),
+                    "Écart-type €/m²":   st.column_config.NumberColumn(format="%d €/m²"),
+                },
+            )
+        else:
+            st.info("Pas assez de données par quartier (minimum 2 annonces).")
+    else:
+        st.info("Colonne quartier absente ou données insuffisantes.")
 
     st.markdown('</div>', unsafe_allow_html=True)

@@ -2,8 +2,11 @@
 Regression lineaire simple from scratch.
 Reference : Joel Grus, "Data Science From Scratch", chapitre 14.
 
-IMPORTANT : N'importez pas pour ces fonctions.
+IMPORTANT : N'importez pas numpy, pandas ou sklearn pour ces fonctions.
+Implémentez-les avec du Python pur (listes, boucles, math).
 """
+
+import math
 
 # from analysis.stats import mean, variance, covariance, correlation
 from analysis.stats import mean, variance, covariance, correlation, standard_deviation
@@ -53,18 +56,29 @@ def r_squared(alpha: float, beta: float, x: list, y: list) -> float:
     Coefficient de determination R².
     R² = 1 - (SS_res / SS_tot)
     1.0 = ajustement parfait, 0.0 = le modele n'explique rien.
+    Robuste aux données manquantes : filtre les paires où x_i ou y_i est None/NaN.
     """
+    # Filtre des paires invalides (None ou NaN)
+    pairs = [
+        (x_i, y_i) for x_i, y_i in zip(x, y)
+        if x_i is not None and y_i is not None
+        and not (isinstance(x_i, float) and math.isnan(x_i))
+        and not (isinstance(y_i, float) and math.isnan(y_i))
+    ]
+    if len(pairs) < 2:
+        return 0.0
 
-    # return 1.0 - (sum_of_sqerrors(alpha, beta, x, y)/ total_sum_of_squares(y))
+    x_clean = [p[0] for p in pairs]
+    y_clean = [p[1] for p in pairs]
 
     # Erreur du modèle
-    ss_res = sum_of_sqerrors(alpha, beta, x, y)
+    ss_res = sum_of_sqerrors(alpha, beta, x_clean, y_clean)
 
     # Erreur de la moyenne
-    mean_y = mean(y)
-    ss_tot = sum((y_i - mean_y) ** 2 for y_i in y)
-    
-    # R²
-    r2 = 1.0 - (ss_res / ss_tot)
-    
-    return r2
+    mean_y = mean(y_clean)
+    ss_tot = sum((y_i - mean_y) ** 2 for y_i in y_clean)
+
+    if ss_tot == 0:
+        return 0.0
+
+    return 1.0 - (ss_res / ss_tot)

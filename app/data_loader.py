@@ -86,10 +86,20 @@ def load_data() -> pd.DataFrame:
 def _process(df: pd.DataFrame) -> pd.DataFrame:
     """Nettoyage et enrichissement communs (Supabase ou CSV)."""
 
+    # Filtre : types de bien pertinents uniquement (exclut Programme, terrain, etc.)
+    if "type_local" in df.columns:
+        df = df[df["type_local"].isin(["Appartement", "Maison"])].copy()
+
     # Conversion numérique
     for col in ("valeur_fonciere", "surface_reelle_bati", "nombre_pieces_principales"):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Suppression des aberrations
+    if "valeur_fonciere" in df.columns:
+        df = df[~((df["valeur_fonciere"].notna()) & (df["valeur_fonciere"] < 1_000))].copy()
+    if "surface_reelle_bati" in df.columns:
+        df = df[~((df["surface_reelle_bati"].notna()) & (df["surface_reelle_bati"] < 9))].copy()
 
     # Prix au m²
     mask = df["surface_reelle_bati"].fillna(0) > 0
@@ -134,6 +144,12 @@ def get_dvf_models(dvf_csv_path: str = str(DVF_CSV_PATH)) -> dict:
         # Nettoyage minimal
         for col in ("valeur_fonciere", "surface_reelle_bati"):
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # Filtre temporel : 2 dernières années (2024-2025) uniquement
+        if "date_mutation" in df.columns:
+            df["date_mutation"] = pd.to_datetime(df["date_mutation"], errors="coerce")
+            df = df[df["date_mutation"] >= "2024-01-01"].copy()
+
         df["prix_m2"] = df["valeur_fonciere"] / df["surface_reelle_bati"]
 
         models: dict = {}
@@ -151,8 +167,8 @@ def get_dvf_models(dvf_csv_path: str = str(DVF_CSV_PATH)) -> dict:
                 models[ttype] = DVF_REGRESSION.get(ttype, {})
                 continue
 
-            x = sub["surface_reelle_bati"].to_numpy(dtype=float)
-            y = sub["valeur_fonciere"].to_numpy(dtype=float)
+            x = sub["surface_reelle_bati"].tolist()
+            y = sub["valeur_fonciere"].tolist()
             slope, intercept = least_squares_fit(x, y)
             r2 = r_squared(x, y, slope, intercept)
 

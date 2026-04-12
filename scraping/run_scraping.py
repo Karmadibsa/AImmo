@@ -159,7 +159,11 @@ def _parse_annonce(ad: dict) -> dict | None:
 
     # ── Type de bien ──────────────────────────────────────────────────────────
     raw_type  = ad.get("propertyType", "")
-    type_bien = PROPERTY_TYPE_MAP.get(raw_type, raw_type.capitalize() if raw_type else "Autre")
+    type_bien = PROPERTY_TYPE_MAP.get(raw_type)
+    if type_bien is None:
+        # Filtre strict : on n'accepte que Maison et Appartement.
+        # Les programmes neufs, terrains, parkings, etc. sont ignorés.
+        return None
 
     # ── Source (agence ou particulier) ────────────────────────────────────────
     source = ad.get("accountDisplayName") or "BienIci"

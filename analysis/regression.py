@@ -2,7 +2,7 @@
 Regression lineaire simple from scratch.
 Reference : Joel Grus, "Data Science From Scratch", chapitre 14.
 
-IMPORTANT : N'importez pas numpy, pandas ou sklearn pour ces fonctions.
+IMPORTANT : N'importez pas numpy, pandas ou les bibliothèques ML pour ces fonctions.
 Implémentez-les avec du Python pur (listes, boucles, math).
 """
 

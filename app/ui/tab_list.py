@@ -1,5 +1,6 @@
 """Onglet 2 — Liste des biens avec tableau + fiches détaillées."""
 
+import json
 import sys
 from pathlib import Path
 
@@ -17,6 +18,8 @@ try:
     _HAS_KNN = True
 except Exception:
     _HAS_KNN = False
+
+PAGE_SIZE = 20  # nombre de fiches par page
 
 
 def render_list(df: pd.DataFrame) -> None:
@@ -66,16 +69,46 @@ def render_list(df: pd.DataFrame) -> None:
     st.markdown("---")
     st.markdown("#### 🔍 Fiches détaillées")
 
-    for idx_int, (_, row) in enumerate(df.iterrows()):
-        titre       = str(row.get("titre", "Annonce sans titre"))
-        prix        = row.get("valeur_fonciere")
-        surface     = row.get("surface_reelle_bati")
-        pm2         = row.get("prix_m2")
-        ep_lst      = row.get("ecart_pct")
-        tags        = row.get("tags", [])
-        source      = str(row.get("source", "")).upper()
-        prix_baisse = row.get("prix_baisse")
-        annee_constr= row.get("annee_construction")
+    # ── Pagination ────────────────────────────────────────────────────────────
+    total    = len(df)
+    n_pages  = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    page_key = "list_page"
+    if page_key not in st.session_state:
+        st.session_state[page_key] = 0
+    # Reset si les filtres ont changé et la page dépasse
+    if st.session_state[page_key] >= n_pages:
+        st.session_state[page_key] = 0
+
+    page = st.session_state[page_key]
+    start = page * PAGE_SIZE
+    end   = min(start + PAGE_SIZE, total)
+    df_page = df.iloc[start:end].copy()
+
+    # Barre de navigation
+    col_prev, col_info, col_next = st.columns([1, 3, 1])
+    with col_prev:
+        if st.button("◀ Précédent", disabled=(page == 0), use_container_width=True):
+            st.session_state[page_key] -= 1
+            st.rerun()
+    with col_info:
+        st.caption(f"Biens {start + 1}–{end} sur {total} · Page {page + 1}/{n_pages}")
+    with col_next:
+        if st.button("Suivant ▶", disabled=(page >= n_pages - 1), use_container_width=True):
+            st.session_state[page_key] += 1
+            st.rerun()
+
+    # ── Fiches de la page courante ────────────────────────────────────────────
+    for idx_int, (_, row) in enumerate(df_page.iterrows()):
+        global_idx   = start + idx_int
+        titre        = str(row.get("titre", "Annonce sans titre"))
+        prix         = row.get("valeur_fonciere")
+        surface      = row.get("surface_reelle_bati")
+        pm2          = row.get("prix_m2")
+        ep_lst       = row.get("ecart_pct")
+        tags         = row.get("tags", [])
+        source       = str(row.get("source", "")).upper()
+        prix_baisse  = row.get("prix_baisse")
+        annee_constr = row.get("annee_construction")
 
         lbl = titre
         if pd.notna(prix):    lbl += f"  ·  {prix:,.0f} €"
@@ -165,10 +198,10 @@ def render_list(df: pd.DataFrame) -> None:
                     st.markdown(f"[🥽 Visite virtuelle →]({visite})")
 
             with right:
-                # Carousel photos
+                # Carousel photos (sans rerun — 3 photos en colonnes)
                 _photos_raw = row.get("photos")
                 if _photos_raw is not None:
-                    _card_key = str(row.get("url", idx_int))
+                    _card_key = str(row.get("url", global_idx))
                     photo_carousel(_photos_raw, key=f"list_{_card_key}")
 
                 if tags:
@@ -183,36 +216,59 @@ def render_list(df: pd.DataFrame) -> None:
                 else:
                     st.caption("Pas de description disponible.")
 
-            # ── Biens similaires (k-NN from scratch) ─────────────────────────
+            # ── Biens similaires (k-NN) — à la demande ───────────────────────
             if _HAS_KNN and len(df) >= 4:
-                st.markdown("---")
-                st.markdown("**🔍 Biens similaires** *(k-NN from scratch)*")
-                try:
-                    items_list = df.to_dict("records")
-                    similars = find_similar_properties(
-                        items_list, target_idx=idx_int, k=3,
-                        feature_keys=["surface_reelle_bati", "valeur_fonciere",
-                                      "nombre_pieces_principales", "prix_m2"],
-                    )
-                    scols = st.columns(len(similars))
-                    for ci, sim in enumerate(similars):
-                        with scols[ci]:
-                            s_titre   = str(sim.get("titre", ""))[:40]
-                            s_prix    = sim.get("valeur_fonciere")
-                            s_surf    = sim.get("surface_reelle_bati")
-                            s_sim_pct = sim.get("_similarite_pct", 0)
-                            s_url     = sim.get("url", "")
-                            prix_str  = f"{s_prix:,.0f} €"  if pd.notna(s_prix) else "—"
-                            surf_str  = f"{s_surf:.0f} m²" if pd.notna(s_surf) else "—"
-                            st.markdown(
-                                f'<div class="section-card" style="padding:10px 14px;">'
-                                f'<small style="color:#64748B;">{s_sim_pct:.0f}% similaire</small><br>'
-                                f'<b style="font-size:12px;">{s_titre}…</b><br>'
-                                f'<span style="color:#1B2B4B;font-weight:700;">{prix_str}</span>'
-                                f' · <span style="color:#64748B;">{surf_str}</span><br>'
-                                + (f'<a href="{s_url}" target="_blank" style="font-size:11px;">🔗 Voir</a>' if s_url else "")
-                                + '</div>',
-                                unsafe_allow_html=True,
-                            )
-                except Exception:
-                    pass  # silencieux si erreur k-NN
+                knn_key = f"knn_show_{global_idx}_p{page}"
+                if knn_key not in st.session_state:
+                    st.session_state[knn_key] = False
+
+                if not st.session_state[knn_key]:
+                    if st.button("🔍 Voir les biens similaires", key=f"knn_btn_{global_idx}_p{page}"):
+                        st.session_state[knn_key] = True
+                        st.rerun()
+                else:
+                    st.markdown("---")
+                    st.markdown("**🔍 Biens similaires** *(k-NN from scratch)*")
+                    try:
+                        items_list = df.to_dict("records")
+                        similars = find_similar_properties(
+                            items_list, target_idx=global_idx, k=3,
+                            feature_keys=["surface_reelle_bati", "valeur_fonciere",
+                                          "nombre_pieces_principales", "prix_m2"],
+                        )
+                        scols = st.columns(len(similars))
+                        for ci, sim in enumerate(similars):
+                            with scols[ci]:
+                                s_titre   = str(sim.get("titre", ""))[:40]
+                                s_prix    = sim.get("valeur_fonciere")
+                                s_surf    = sim.get("surface_reelle_bati")
+                                s_sim_pct = sim.get("_similarite_pct", 0)
+                                s_url     = sim.get("url", "")
+                                prix_str  = f"{s_prix:,.0f} €"  if pd.notna(s_prix) else "—"
+                                surf_str  = f"{s_surf:.0f} m²" if pd.notna(s_surf) else "—"
+                                st.markdown(
+                                    f'<div class="section-card" style="padding:10px 14px;">'
+                                    f'<small style="color:#64748B;">{s_sim_pct:.0f}% similaire</small><br>'
+                                    f'<b style="font-size:12px;">{s_titre}…</b><br>'
+                                    f'<span style="color:#1B2B4B;font-weight:700;">{prix_str}</span>'
+                                    f' · <span style="color:#64748B;">{surf_str}</span><br>'
+                                    + (f'<a href="{s_url}" target="_blank" style="font-size:11px;">🔗 Voir</a>' if s_url else "")
+                                    + '</div>',
+                                    unsafe_allow_html=True,
+                                )
+                    except Exception:
+                        pass
+
+    # Navigation bas de page
+    st.markdown("---")
+    col_prev2, col_info2, col_next2 = st.columns([1, 3, 1])
+    with col_prev2:
+        if st.button("◀ Précédent", key="prev_bot", disabled=(page == 0), use_container_width=True):
+            st.session_state[page_key] -= 1
+            st.rerun()
+    with col_info2:
+        st.caption(f"Page {page + 1} / {n_pages}")
+    with col_next2:
+        if st.button("Suivant ▶", key="next_bot", disabled=(page >= n_pages - 1), use_container_width=True):
+            st.session_state[page_key] += 1
+            st.rerun()

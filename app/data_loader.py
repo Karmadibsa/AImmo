@@ -17,16 +17,6 @@ from config import CSV_PATH, DVF_CSV_PATH, DVF_PM2_FILTERS, DVF_REGRESSION
 from analysis.regression import least_squares_fit, r_squared
 from ui.components import extract_tags
 
-# Import tardif pour éviter les erreurs si le module est absent
-try:
-    import sys as _sys
-    _sys.path.insert(0, str(CSV_PATH.parent.parent))
-    from analysis.dpe_extractor import extract_dpe as _extract_dpe
-    _sys.path.pop(0)
-    _HAS_DPE_EXTRACTOR = True
-except Exception:
-    _HAS_DPE_EXTRACTOR = False
-
 # ── Mapping colonnes Supabase → noms attendus par l'app ──────────────────────
 # La table Supabase utilise des noms courts ; l'app utilise le schéma DVF.
 SUPABASE_COL_MAP: dict[str, str] = {
@@ -129,17 +119,15 @@ def _process(df: pd.DataFrame) -> pd.DataFrame:
     if "description" in df.columns:
         df["tags"] = df["description"].apply(extract_tags)
 
-    # Enrichissement DPE depuis la description (si colonne absente ou partiellement vide)
-    if _HAS_DPE_EXTRACTOR and "description" in df.columns:
-        if "dpe" not in df.columns:
-            df["dpe"] = None
-        # Complète uniquement les DPE manquants (ne remplace pas les valeurs existantes)
-        mask_missing = df["dpe"].isna()
-        if mask_missing.any():
-            df.loc[mask_missing, "dpe"] = (
-                df.loc[mask_missing, "description"]
-                .apply(_extract_dpe)
-            )
+    # DPE / GES / énergie — proviennent directement de l'API BienIci via Supabase.
+    # On ne complète PAS par heuristiques textuelles : si la valeur est NULL en base,
+    # c'est qu'elle est inconnue → on laisse NaN pour ne pas afficher de fausse info.
+    for col in ("dpe", "ges"):
+        if col in df.columns:
+            df[col] = df[col].where(df[col].isin(list("ABCDEFG")), other=None)
+
+    if "energie_valeur" in df.columns:
+        df["energie_valeur"] = pd.to_numeric(df["energie_valeur"], errors="coerce")
 
     return df
 

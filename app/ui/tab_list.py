@@ -98,22 +98,40 @@ def render_list(df: pd.DataFrame) -> None:
                         unsafe_allow_html=True,
                     )
 
-                # Badge DPE
-                dpe_val = row.get("dpe")
+                # Badges DPE + GES
                 _DPE_COLORS = {
                     "A": ("#00A651", "#fff"), "B": ("#51B747", "#fff"),
                     "C": ("#A8CC3B", "#000"), "D": ("#FFED00", "#000"),
                     "E": ("#F7931D", "#fff"), "F": ("#ED1C24", "#fff"),
                     "G": ("#9B1B22", "#fff"),
                 }
+                _GES_COLORS = {
+                    "A": ("#E8F5E9", "#1B5E20"), "B": ("#C8E6C9", "#1B5E20"),
+                    "C": ("#A5D6A7", "#1B5E20"), "D": ("#EDE7F6", "#4A148C"),
+                    "E": ("#CE93D8", "#fff"),    "F": ("#AB47BC", "#fff"),
+                    "G": ("#6A1B9A", "#fff"),
+                }
+                dpe_val = row.get("dpe")
+                ges_val = row.get("ges")
+                nrj_val = row.get("energie_valeur")
+                badges_html = ""
                 if pd.notna(dpe_val) and str(dpe_val) in _DPE_COLORS:
                     bg, fg = _DPE_COLORS[str(dpe_val)]
-                    st.markdown(
+                    badges_html += (
                         f'<span style="background:{bg};color:{fg};padding:2px 10px;'
-                        f'border-radius:4px;font-weight:700;font-size:13px;">'
-                        f'DPE {dpe_val}</span>',
-                        unsafe_allow_html=True,
+                        f'border-radius:4px;font-weight:700;font-size:13px;margin-right:6px;">'
+                        f'DPE {dpe_val}</span>'
                     )
+                if pd.notna(ges_val) and str(ges_val) in _GES_COLORS:
+                    bg, fg = _GES_COLORS[str(ges_val)]
+                    badges_html += (
+                        f'<span style="background:{bg};color:{fg};padding:2px 10px;'
+                        f'border-radius:4px;font-weight:600;font-size:13px;">GES {ges_val}</span>'
+                    )
+                if badges_html:
+                    st.markdown(badges_html, unsafe_allow_html=True)
+                if pd.notna(nrj_val) and nrj_val > 0:
+                    st.caption(f"⚡ {int(nrj_val)} kWhEP/m²/an")
 
                 info_lines = [
                     ("🏷️ Source",  source),

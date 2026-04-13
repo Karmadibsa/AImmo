@@ -293,24 +293,26 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── 5b. DPE — Distribution & Impact sur le prix ──────────────────────────
+    # ── 5b. DPE / GES — Distribution & Impact sur le prix ───────────────────
     if "dpe" in df.columns and df["dpe"].notna().sum() >= 5:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 🌿 DPE — Distribution & Impact sur le prix")
+        st.markdown("#### 🌿 DPE & GES — Performance énergétique des annonces")
         st.caption(
-            "Le DPE (Diagnostic de Performance Énergétique) est extrait automatiquement "
-            "des descriptions d'annonces via un moteur de patterns (algorithme from scratch)."
+            "Données **officielles** issues directement de l'API BienIci "
+            "(DPE obligatoire depuis 2021). Seules les annonces disposant d'un DPE "
+            "renseigné à la source sont affichées — aucune valeur n'est inventée."
         )
+
+        DPE_ORDER  = ["A", "B", "C", "D", "E", "F", "G"]
+        DPE_COLORS = {
+            "A": "#00A651", "B": "#51B747", "C": "#A8CC3B",
+            "D": "#FFED00", "E": "#F7931D", "F": "#ED1C24", "G": "#9B1B22",
+        }
 
         col_dpe1, col_dpe2 = st.columns(2, gap="medium")
 
         with col_dpe1:
             # Distribution des classes DPE
-            DPE_ORDER = ["A", "B", "C", "D", "E", "F", "G"]
-            DPE_COLORS = {
-                "A": "#00A651", "B": "#51B747", "C": "#A8CC3B",
-                "D": "#FFED00", "E": "#F7931D", "F": "#ED1C24", "G": "#9B1B22",
-            }
             dpe_counts = df["dpe"].value_counts().reindex(DPE_ORDER).dropna().astype(int)
             if not dpe_counts.empty:
                 fig_dpe_dist = go.Figure(go.Bar(
@@ -330,7 +332,7 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
                 st.plotly_chart(fig_dpe_dist, use_container_width=True)
                 n_dpe = int(dpe_counts.sum())
                 n_tot = len(df)
-                st.caption(f"📊 {n_dpe} / {n_tot} annonces ({n_dpe/n_tot*100:.0f} %) disposent d'une classe DPE détectée.")
+                st.caption(f"📊 {n_dpe} / {n_tot} annonces ({n_dpe/n_tot*100:.0f} %) ont un DPE renseigné.")
             else:
                 st.info("Pas de données DPE disponibles.")
 
@@ -351,15 +353,14 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
                     rows_dpe.append({"DPE": classe, "Prix/m² médian": round(med), "N": n})
 
                 if rows_dpe:
-                    classes  = [r["DPE"] for r in rows_dpe]
-                    prix_med = [r["Prix/m² médian"] for r in rows_dpe]
-                    colors   = [DPE_COLORS.get(c, "#94A3B8") for c in classes]
-
                     fig_dpe_prix = go.Figure(go.Bar(
-                        x=classes, y=prix_med,
-                        marker_color=colors,
-                        text=[f"{p:,} €/m²" for p in prix_med],
+                        x=[r["DPE"] for r in rows_dpe],
+                        y=[r["Prix/m² médian"] for r in rows_dpe],
+                        marker_color=[DPE_COLORS.get(r["DPE"], "#94A3B8") for r in rows_dpe],
+                        text=[f"{r['Prix/m² médian']:,} €/m²" for r in rows_dpe],
                         textposition="outside",
+                        customdata=[[r["N"]] for r in rows_dpe],
+                        hovertemplate="Classe %{x}<br>%{y:,.0f} €/m²<br>N=%{customdata[0]}<extra></extra>",
                     ))
                     fig_dpe_prix.update_layout(
                         title_text="Prix/m² médian par classe DPE",
@@ -371,13 +372,68 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
                     fig_dpe_prix.update_yaxes(tickformat=",.0f", ticksuffix=" €")
                     st.plotly_chart(fig_dpe_prix, use_container_width=True)
                     st.caption(
-                        "💡 Les biens en classe A/B sont souvent mieux valorisés ; "
-                        "les passoires thermiques (F/G) tendent à être décotées."
+                        "💡 Les biens A/B sont souvent mieux valorisés ; "
+                        "les passoires thermiques F/G tendent à être décotées."
                     )
                 else:
                     st.info("Pas assez de données DPE par classe (min. 2 annonces).")
             else:
                 st.info("Pas de données DPE avec prix/m² disponibles.")
+
+        # Distribution GES (si disponible)
+        if "ges" in df.columns and df["ges"].notna().sum() >= 5:
+            st.markdown("---")
+            col_ges1, col_ges2 = st.columns(2, gap="medium")
+            GES_COLORS = {
+                "A": "#C8E6C9", "B": "#81C784", "C": "#4CAF50",
+                "D": "#AB47BC", "E": "#8E24AA", "F": "#6A1B9A", "G": "#4A148C",
+            }
+            with col_ges1:
+                ges_counts = df["ges"].value_counts().reindex(DPE_ORDER).dropna().astype(int)
+                if not ges_counts.empty:
+                    fig_ges = go.Figure(go.Bar(
+                        x=ges_counts.index.tolist(),
+                        y=ges_counts.values.tolist(),
+                        marker_color=[GES_COLORS.get(g, "#94A3B8") for g in ges_counts.index],
+                        text=ges_counts.values.tolist(),
+                        textposition="outside",
+                    ))
+                    fig_ges.update_layout(
+                        title_text="Répartition des classes GES (émissions CO₂)",
+                        height=260, margin=dict(t=40, b=10, l=0, r=0),
+                        paper_bgcolor="white", plot_bgcolor="white",
+                        showlegend=False,
+                        xaxis_title="Classe GES", yaxis_title="Annonces",
+                    )
+                    st.plotly_chart(fig_ges, use_container_width=True)
+
+            with col_ges2:
+                # Scatter DPE vs GES pour voir la corrélation
+                df_dg = df.dropna(subset=["dpe", "ges"])
+                if len(df_dg) >= 5:
+                    _dpe_num = {"A":7,"B":6,"C":5,"D":4,"E":3,"F":2,"G":1}
+                    df_dg = df_dg.copy()
+                    df_dg["_dpe_n"] = df_dg["dpe"].map(_dpe_num)
+                    df_dg["_ges_n"] = df_dg["ges"].map(_dpe_num)
+                    # Comptage croisé DPE × GES
+                    cross = (
+                        df_dg.groupby(["dpe", "ges"])
+                        .size().reset_index(name="N")
+                    )
+                    fig_cross = px.scatter(
+                        cross, x="dpe", y="ges", size="N",
+                        color="N", color_continuous_scale="Blues",
+                        category_orders={"dpe": DPE_ORDER, "ges": DPE_ORDER},
+                        labels={"dpe": "Classe DPE", "ges": "Classe GES", "N": "Annonces"},
+                        template="simple_white",
+                        title="Corrélation DPE ↔ GES",
+                    )
+                    fig_cross.update_layout(
+                        height=260, margin=dict(t=40, b=10, l=0, r=0),
+                        paper_bgcolor="white", coloraxis_showscale=False,
+                    )
+                    st.plotly_chart(fig_cross, use_container_width=True)
+                    st.caption("Un bien bien isolé (DPE A) émet aussi peu de CO₂ (GES A) dans la grande majorité des cas.")
 
         st.markdown('</div>', unsafe_allow_html=True)
 

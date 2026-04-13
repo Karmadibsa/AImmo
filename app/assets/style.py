@@ -30,6 +30,18 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 [data-testid="stSidebar"] * {
     color: var(--text-color, #CBD5E1);
 }
+/* Placeholder des inputs sidebar (sinon texte sombre sur fond sombre) */
+[data-testid="stSidebar"] input::placeholder,
+[data-testid="stSidebar"] textarea::placeholder {
+    color: #94A3B8 !important;
+    opacity: 1 !important;
+}
+/* Inline code dans la sidebar (date de MAJ) : fond sombre cohérent */
+[data-testid="stSidebar"] code {
+    background: #253859 !important;
+    color: #E2E8F0 !important;
+    border: none !important;
+}
 [data-testid="stSidebar"] div,
 [data-testid="stSidebar"] span,
 [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,

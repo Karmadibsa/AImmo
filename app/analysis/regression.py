@@ -58,7 +58,7 @@ def compute_regression(df_input: pd.DataFrame) -> pd.DataFrame:
     """
     results = []
     for ttype, grp in df_input.groupby("type_local"):
-        grp = grp.dropna(subset=["valeur_fonciere", "surface_reelle_bati"]).copy()
+        grp = grp.dropna(subset=["valeur_fonciere", "surface_reelle_bati"]).copy().reset_index(drop=True)
         grp = grp[(grp["surface_reelle_bati"] > 10) & (grp["valeur_fonciere"] > 10_000)]
 
         if len(grp) < 2:
@@ -111,7 +111,7 @@ def compute_dvf_scores(
     """
     _models = models if models is not None else DVF_REGRESSION
 
-    df = df_input.copy()
+    df = df_input.copy().reset_index(drop=True)
     for col in ["dvf_prix_predit", "dvf_ecart", "dvf_ecart_pct", "_dvf_slope", "_dvf_intercept"]:
         df[col] = float("nan")
 
@@ -179,7 +179,7 @@ def compute_neighborhood_scores(df_input: pd.DataFrame) -> pd.DataFrame:
       qrt_ecart       : économie en € (négatif = sous-évalué)
       qrt_ecart_pct   : écart en % par rapport au prix attendu
     """
-    df = df_input.copy()
+    df = df_input.copy().reset_index(drop=True)
     for col in ["qrt_mean_pm2", "qrt_std_pm2", "qrt_prix_predit", "qrt_ecart", "qrt_ecart_pct"]:
         df[col] = float("nan")
 
@@ -261,7 +261,9 @@ def compute_multivariate_regression(df_input: pd.DataFrame) -> pd.DataFrame:
     results = []
 
     for ttype, grp in df_input.groupby("type_local"):
-        grp = grp.copy()
+        # reset_index évite le bug "cannot reindex on an axis with duplicate labels"
+        # qui survient quand df_input a des index dupliqués (après merges)
+        grp = grp.copy().reset_index(drop=True)
         for col in ["mv_prix_predit", "mv_ecart", "mv_ecart_pct", "mv_r2"]:
             grp[col] = float("nan")
 

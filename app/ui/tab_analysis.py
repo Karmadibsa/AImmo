@@ -109,18 +109,29 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
             st.info("Pas assez de données.")
         st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── 4. Répartition par Sources (Bar) ──────────────────────────────────────
+    # ── 4. Distribution par nombre de pièces ──────────────────────────────────
     with col_r2:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 📡 Répartition par Sources")
-        if not df.empty:
-            src = df["source"].value_counts().reset_index()
-            src.columns = ["Source", "Annonces"]
+        st.markdown("#### 🚪 Distribution par nombre de pièces")
+        df_pc = df.dropna(subset=["nombre_pieces_principales"])
+        if not df_pc.empty:
+            df_pc = df_pc.copy()
+            df_pc["pieces_label"] = df_pc["nombre_pieces_principales"].astype(int).apply(
+                lambda x: f"T{x}" if 1 <= x <= 5 else ("T6+" if x > 5 else "N/A")
+            )
+            ordre = ["T1", "T2", "T3", "T4", "T5", "T6+"]
+            counts = (
+                df_pc["pieces_label"].value_counts()
+                .reindex([o for o in ordre if o in df_pc["pieces_label"].unique()])
+                .reset_index()
+            )
+            counts.columns = ["Type", "Annonces"]
             fig = px.bar(
-                src, x="Source", y="Annonces",
-                color="Source",
-                color_discrete_sequence=["#E8714A", "#1B2B4B", "#27AE60", "#8B5CF6"],
-                template="simple_white", text="Annonces",
+                counts, x="Type", y="Annonces",
+                color="Type",
+                color_discrete_sequence=["#93B4D4", "#6B94BF", "#4A7DAA", "#2C4A8A",
+                                         "#1B2B4B", "#E8714A"],
+                text="Annonces", template="simple_white",
             )
             fig.update_traces(textposition="outside", marker_line_width=0)
             fig.update_layout(
@@ -128,6 +139,8 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
                 showlegend=False, paper_bgcolor="white", plot_bgcolor="white",
             )
             st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Pas assez de données.")
         st.markdown('</div>', unsafe_allow_html=True)
 
     # ── 5. Analyse de régression — au choix ──────────────────────────────────

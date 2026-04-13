@@ -116,20 +116,20 @@ if keyword:
 
 # ── Régressions ────────────────────────────────────────────────────────────────
 df_scored = (
-    compute_regression(df[df["type_local"].notna()].copy())
+    compute_regression(df[df["type_local"].notna()].copy().reset_index(drop=True))
     if not df.empty else pd.DataFrame()
 )
 if (not df_scored.empty and "ecart_pct" in df_scored.columns
         and "url" in df_scored.columns and "url" in df.columns):
     _reg_cols = df_scored[["url", "ecart_pct", "ecart", "prix_predit"]].dropna(subset=["url"])
-    df = df.merge(_reg_cols, on="url", how="left", suffixes=("", "_reg"))
+    df = df.merge(_reg_cols, on="url", how="left", suffixes=("", "_reg")).reset_index(drop=True)
 
 df_dvf = (
-    compute_dvf_scores(df[df["type_local"].notna()].copy(), models=dvf_models)
+    compute_dvf_scores(df[df["type_local"].notna()].copy().reset_index(drop=True), models=dvf_models)
     if not df.empty else pd.DataFrame()
 )
 df_qrt = (
-    compute_neighborhood_scores(df[df["type_local"].notna()].copy())
+    compute_neighborhood_scores(df[df["type_local"].notna()].copy().reset_index(drop=True))
     if not df.empty else pd.DataFrame()
 )
 

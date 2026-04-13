@@ -17,6 +17,7 @@ from config import DVF_CSV_PATH
 from data_loader import get_dvf_models, load_data, load_dvf_raw
 from ui.tab_analysis import render_analysis
 from ui.tab_assistant import render_assistant
+from ui.tab_comparator import render_comparator
 from ui.tab_list import render_list
 from ui.tab_map import render_map
 from ui.tab_opportunities import render_opportunities
@@ -184,10 +185,11 @@ k4.metric("💶 Prix/m² médian",  f"{pm2_med:,.0f} €/m²"  if pm2_med else "
           delta=dvf_pm2_label, delta_color="inverse")
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-tab_analyse, tab_liste, tab_opps, tab_carte, tab_asst = st.tabs([
+tab_analyse, tab_liste, tab_opps, tab_cmp, tab_carte, tab_asst = st.tabs([
     "📊  Marché",
     "📋  Liste des biens",
     "💡  Opportunités",
+    "⚖️  Comparateur",
     "🗺️  Carte",
     "🤖  Assistant",
 ])
@@ -200,6 +202,9 @@ with tab_liste:
 
 with tab_opps:
     render_opportunities(df, df_dvf, df_scored, df_qrt)
+
+with tab_cmp:
+    render_comparator(df)
 
 with tab_carte:
     # On passe df_dvf (annonces scorées DVF) ou df si pas de scores

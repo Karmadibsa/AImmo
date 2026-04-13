@@ -318,14 +318,13 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
 
     st.markdown('</div>', unsafe_allow_html=True)
 
-    # ── 7. Tendances du marché — Prix/m² médian mensuel (DVF 2024-2025) ──────
+    # ── 7. Tendances + Projection 2026 (DVF 2024-2025) ───────────────────────
     if df_dvf is not None and not df_dvf.empty:
         st.markdown('<div class="section-card">', unsafe_allow_html=True)
-        st.markdown("#### 📈 Tendances du marché — Prix/m² médian mensuel (DVF 2024-2025)")
+        st.markdown("#### 📈 Tendances du marché & projection — Prix/m² médian mensuel")
 
         _trend = df_dvf[
             df_dvf["type_local"].isin(["Appartement", "Maison"])
-            & (df_dvf.get("nature_mutation", pd.Series(["Vente"] * len(df_dvf))) == "Vente")
             & (df_dvf["surface_reelle_bati"].fillna(0) > 9)
             & (df_dvf["prix_m2"].notna())
             & (df_dvf["prix_m2"] > 500)
@@ -333,6 +332,8 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
 
         if not _trend.empty and "date_mutation" in _trend.columns:
             _trend["mois"] = _trend["date_mutation"].dt.to_period("M").astype(str)
+
+            # Agrégation mensuelle par type
             _agg = (
                 _trend.groupby(["mois", "type_local"])["prix_m2"]
                 .median()
@@ -340,23 +341,170 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
                 .rename(columns={"prix_m2": "Prix/m² médian", "type_local": "Type"})
                 .sort_values("mois")
             )
-            fig_trend = px.line(
-                _agg, x="mois", y="Prix/m² médian", color="Type",
-                color_discrete_map={"Appartement": "#E8714A", "Maison": "#1B2B4B"},
-                markers=True,
-                labels={"mois": "Mois", "Prix/m² médian": "€/m² médian"},
-                template="simple_white",
-            )
-            fig_trend.update_layout(
-                height=300, margin=dict(t=10, b=10, l=0, r=0),
-                paper_bgcolor="white", plot_bgcolor="white",
-                legend=dict(orientation="h", yanchor="bottom", y=1, xanchor="right", x=1),
-                legend_title_text="",
-                xaxis=dict(tickangle=-45),
-            )
-            fig_trend.update_yaxes(tickformat=",.0f", ticksuffix=" €/m²")
-            st.plotly_chart(fig_trend, use_container_width=True)
+
+            # Projection from scratch via trend_projection
+            try:
+                import sys as _sys
+                _root = str(__import__("pathlib").Path(__file__).parent.parent.parent)
+                if _root not in _sys.path:
+                    _sys.path.insert(0, _root)
+                from analysis.trend_projection import project_prices
+
+                fig_trend = go.Figure()
+                COLS_T = {"Appartement": "#E8714A", "Maison": "#1B2B4B"}
+
+                for ttype in ["Appartement", "Maison"]:
+                    sub = _agg[_agg["Type"] == ttype].sort_values("mois")
+                    if len(sub) < 3:
+                        continue
+                    c = COLS_T[ttype]
+                    monthly = dict(zip(sub["mois"], sub["Prix/m² médian"]))
+                    result  = project_prices(monthly, n_months_ahead=6)
+
+                    # Historique
+                    h_periods = sorted(result["historique"].keys())
+                    h_values  = [result["historique"][p] for p in h_periods]
+                    fig_trend.add_trace(go.Scatter(
+                        x=h_periods, y=h_values, mode="lines+markers",
+                        name=ttype, line=dict(color=c, width=2),
+                        marker=dict(size=5),
+                    ))
+
+                    # Projection (pointillés)
+                    p_periods = sorted(result["projection"].keys())
+                    p_values  = [result["projection"][p] for p in p_periods]
+                    # Point de raccord : dernier historique → premier projeté
+                    fig_trend.add_trace(go.Scatter(
+                        x=[h_periods[-1]] + p_periods,
+                        y=[h_values[-1]]  + p_values,
+                        mode="lines+markers", name=f"{ttype} (projection)",
+                        line=dict(color=c, width=2, dash="dot"),
+                        marker=dict(size=4, symbol="diamond"),
+                        hovertemplate="%{x} : %{y:,.0f} €/m²<extra>Projection " + ttype + "</extra>",
+                    ))
+
+                    # Annotation tendance
+                    beta = result["beta"]
+                    var  = result["variation_annuelle_pct"]
+                    lbl  = f"{ttype} : {'+' if beta >= 0 else ''}{var:.1f} %/an"
+                    if p_periods:
+                        fig_trend.add_annotation(
+                            x=p_periods[-1], y=p_values[-1],
+                            text=lbl, showarrow=False,
+                            font=dict(size=11, color=c),
+                            xanchor="left", yanchor="middle",
+                        )
+
+                # Séparateur "aujourd'hui"
+                last_hist = sorted(_agg["mois"].unique())[-1]
+                fig_trend.add_vline(
+                    x=last_hist, line_dash="dash", line_color="#94A3B8",
+                    annotation_text="Aujourd'hui", annotation_position="top left",
+                )
+
+                fig_trend.update_layout(
+                    height=340, margin=dict(t=30, b=10, l=0, r=120),
+                    paper_bgcolor="white", plot_bgcolor="white",
+                    legend=dict(orientation="h", yanchor="bottom", y=1, xanchor="right", x=1),
+                    legend_title_text="",
+                    xaxis=dict(tickangle=-45),
+                )
+                fig_trend.update_yaxes(tickformat=",.0f", ticksuffix=" €/m²")
+                st.plotly_chart(fig_trend, use_container_width=True)
+
+            except Exception as e:
+                # Fallback : graphe simple sans projection
+                fig_trend = px.line(
+                    _agg, x="mois", y="Prix/m² médian", color="Type",
+                    color_discrete_map={"Appartement": "#E8714A", "Maison": "#1B2B4B"},
+                    markers=True, template="simple_white",
+                )
+                fig_trend.update_layout(height=300, paper_bgcolor="white", plot_bgcolor="white")
+                fig_trend.update_yaxes(tickformat=",.0f", ticksuffix=" €/m²")
+                st.plotly_chart(fig_trend, use_container_width=True)
+                st.caption(f"Projection non disponible : {e}")
         else:
             st.info("Données DVF insuffisantes pour calculer les tendances.")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── 8. Comparaison DVF (transactions réelles) vs Annonces actuelles ───────
+    if df_dvf is not None and not df_dvf.empty and not df.empty:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown("#### ⚖️ DVF (ventes réelles 2024-2025) vs Annonces actuelles")
+        st.caption(
+            "Compare le prix/m² des **transactions effectivement réalisées** (DVF, source DGFiP) "
+            "au prix/m² **demandé** dans les annonces actuelles. "
+            "Un écart positif indique que les vendeurs demandent plus que le marché ne paye réellement."
+        )
+
+        rows_cmp = []
+        for ttype in ["Appartement", "Maison"]:
+            # DVF — médiane sur les ventes filtrées
+            dvf_sub = df_dvf[
+                (df_dvf["type_local"] == ttype)
+                & (df_dvf["prix_m2"].notna())
+                & (df_dvf["prix_m2"] > 500)
+                & (df_dvf["surface_reelle_bati"].fillna(0) > 9)
+            ]["prix_m2"]
+            if len(dvf_sub) < 5:
+                continue
+            dvf_median = float(dvf_sub.median())
+
+            # Annonces actuelles — médiane prix/m²
+            ann_sub = df[(df["type_local"] == ttype) & df["prix_m2"].notna()]["prix_m2"]
+            if len(ann_sub) < 2:
+                continue
+            ann_median = float(ann_sub.median())
+
+            ecart_pct = round((ann_median - dvf_median) / dvf_median * 100, 1)
+            rows_cmp.append({
+                "Type":              ttype,
+                "DVF €/m² médian":   round(dvf_median),
+                "Annonces €/m² médian": round(ann_median),
+                "Écart (%)":         ecart_pct,
+                "N DVF":             len(dvf_sub),
+                "N annonces":        len(ann_sub),
+            })
+
+        if rows_cmp:
+            col_c1, col_c2 = st.columns([1, 2], gap="large")
+
+            with col_c1:
+                for r in rows_cmp:
+                    delta_color = "normal" if r["Écart (%)"] >= 0 else "inverse"
+                    st.metric(
+                        label=f"Écart annonces vs DVF — {r['Type']}",
+                        value=f"{r['Annonces €/m² médian']:,} €/m²",
+                        delta=f"{r['Écart (%)']:+.1f} % vs marché réel ({r['DVF €/m² médian']:,} €/m²)",
+                    )
+
+            with col_c2:
+                # Graphe barres groupées
+                fig_cmp = go.Figure()
+                types  = [r["Type"] for r in rows_cmp]
+                dvf_v  = [r["DVF €/m² médian"] for r in rows_cmp]
+                ann_v  = [r["Annonces €/m² médian"] for r in rows_cmp]
+                fig_cmp.add_trace(go.Bar(
+                    name="DVF — ventes réelles", x=types, y=dvf_v,
+                    marker_color="#1B2B4B", text=[f"{v:,} €/m²" for v in dvf_v],
+                    textposition="outside",
+                ))
+                fig_cmp.add_trace(go.Bar(
+                    name="Annonces actuelles", x=types, y=ann_v,
+                    marker_color="#E8714A", text=[f"{v:,} €/m²" for v in ann_v],
+                    textposition="outside",
+                ))
+                fig_cmp.update_layout(
+                    barmode="group", height=280,
+                    margin=dict(t=20, b=10, l=0, r=0),
+                    paper_bgcolor="white", plot_bgcolor="white",
+                    legend=dict(orientation="h", yanchor="bottom", y=1, xanchor="right", x=1),
+                    template="simple_white",
+                )
+                fig_cmp.update_yaxes(tickformat=",.0f", ticksuffix=" €/m²")
+                st.plotly_chart(fig_cmp, use_container_width=True)
+        else:
+            st.info("Pas assez de données pour la comparaison DVF / annonces.")
 
         st.markdown('</div>', unsafe_allow_html=True)

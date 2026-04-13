@@ -1,9 +1,22 @@
 """Onglet 2 — Liste des biens avec tableau + fiches détaillées."""
 
+import sys
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
 from ui.components import market_badge_html, tags_html
+
+# Import du moteur k-NN from scratch
+try:
+    _root = str(Path(__file__).parent.parent.parent)
+    if _root not in sys.path:
+        sys.path.insert(0, _root)
+    from analysis.similarity import find_similar_properties
+    _HAS_KNN = True
+except Exception:
+    _HAS_KNN = False
 
 
 def render_list(df: pd.DataFrame) -> None:
@@ -49,7 +62,7 @@ def render_list(df: pd.DataFrame) -> None:
     st.markdown("---")
     st.markdown("#### 🔍 Fiches détaillées")
 
-    for _, row in df.iterrows():
+    for idx_int, (_, row) in enumerate(df.iterrows()):
         titre   = str(row.get("titre", "Annonce sans titre"))
         prix    = row.get("valeur_fonciere")
         surface = row.get("surface_reelle_bati")
@@ -112,3 +125,37 @@ def render_list(df: pd.DataFrame) -> None:
                     )
                 else:
                     st.caption("Pas de description disponible.")
+
+            # ── Biens similaires (k-NN from scratch) ─────────────────────────
+            if _HAS_KNN and len(df) >= 4:
+                st.markdown("---")
+                st.markdown("**🔍 Biens similaires** *(k-NN from scratch)*")
+                try:
+                    items_list = df.to_dict("records")
+                    similars = find_similar_properties(
+                        items_list, target_idx=idx_int, k=3,
+                        feature_keys=["surface_reelle_bati", "valeur_fonciere",
+                                      "nombre_pieces_principales", "prix_m2"],
+                    )
+                    scols = st.columns(len(similars))
+                    for ci, sim in enumerate(similars):
+                        with scols[ci]:
+                            s_titre   = str(sim.get("titre", ""))[:40]
+                            s_prix    = sim.get("valeur_fonciere")
+                            s_surf    = sim.get("surface_reelle_bati")
+                            s_sim_pct = sim.get("_similarite_pct", 0)
+                            s_url     = sim.get("url", "")
+                            prix_str  = f"{s_prix:,.0f} €"  if pd.notna(s_prix) else "—"
+                            surf_str  = f"{s_surf:.0f} m²" if pd.notna(s_surf) else "—"
+                            st.markdown(
+                                f'<div class="section-card" style="padding:10px 14px;">'
+                                f'<small style="color:#64748B;">{s_sim_pct:.0f}% similaire</small><br>'
+                                f'<b style="font-size:12px;">{s_titre}…</b><br>'
+                                f'<span style="color:#1B2B4B;font-weight:700;">{prix_str}</span>'
+                                f' · <span style="color:#64748B;">{surf_str}</span><br>'
+                                + (f'<a href="{s_url}" target="_blank" style="font-size:11px;">🔗 Voir</a>' if s_url else "")
+                                + '</div>',
+                                unsafe_allow_html=True,
+                            )
+                except Exception:
+                    pass  # silencieux si erreur k-NN

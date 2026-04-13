@@ -18,6 +18,7 @@ from data_loader import get_dvf_models, load_data, load_dvf_raw
 from ui.tab_analysis import render_analysis
 from ui.tab_assistant import render_assistant
 from ui.tab_list import render_list
+from ui.tab_map import render_map
 from ui.tab_opportunities import render_opportunities
 
 # ── Config page ────────────────────────────────────────────────────────────────
@@ -158,16 +159,32 @@ surf_med = df["surface_reelle_bati"].median() if not df.empty and df["surface_re
 pm2_med  = df["prix_m2"].median() if not df.empty and df["prix_m2"].notna().any() else None
 delta_nb = len(df) - len(df_raw) if len(df) != len(df_raw) else None
 
-k1.metric("📋 Annonces",       f"{len(df):,}",          delta=f"{delta_nb:+}" if delta_nb else None)
-k2.metric("💰 Prix médian",    f"{prix_med:,.0f} €"     if prix_med else "—")
+# Delta pm2 : annonces vs DVF (marché réel)
+dvf_pm2_delta = None
+dvf_pm2_label = None
+if pm2_med and not df_dvf_raw.empty and "prix_m2" in df_dvf_raw.columns:
+    dvf_pm2 = df_dvf_raw[df_dvf_raw["prix_m2"].notna()]["prix_m2"].median()
+    if dvf_pm2 and dvf_pm2 > 0:
+        dvf_pm2_delta = round(pm2_med - dvf_pm2)
+        dvf_pm2_label = f"{dvf_pm2_delta:+,.0f} € vs DVF"
+
+# Nombre d'opportunités détectées
+n_opps = 0
+if not df_dvf.empty and "dvf_ecart_pct" in df_dvf.columns:
+    n_opps = int((df_dvf["dvf_ecart_pct"] < -10).sum())
+
+k1.metric("📋 Annonces",        f"{len(df):,}",         delta=f"{delta_nb:+}" if delta_nb else None)
+k2.metric("💰 Prix médian",     f"{prix_med:,.0f} €"    if prix_med else "—")
 k3.metric("📐 Surface médiane", f"{surf_med:.0f} m²"    if surf_med else "—")
-k4.metric("💶 Prix/m² médian", f"{pm2_med:,.0f} €/m²"  if pm2_med else "—")
+k4.metric("💶 Prix/m² médian",  f"{pm2_med:,.0f} €/m²"  if pm2_med else "—",
+          delta=dvf_pm2_label, delta_color="inverse")
 
 # ── Tabs ───────────────────────────────────────────────────────────────────────
-tab_analyse, tab_liste, tab_opps, tab_asst = st.tabs([
+tab_analyse, tab_liste, tab_opps, tab_carte, tab_asst = st.tabs([
     "📊  Marché",
     "📋  Liste des biens",
     "💡  Opportunités",
+    "🗺️  Carte",
     "🤖  Assistant",
 ])
 
@@ -179,6 +196,11 @@ with tab_liste:
 
 with tab_opps:
     render_opportunities(df, df_dvf, df_scored, df_qrt)
+
+with tab_carte:
+    # On passe df_dvf (annonces scorées DVF) ou df si pas de scores
+    _df_carte = df_dvf if (not df_dvf.empty and "latitude" in df_dvf.columns) else df
+    render_map(_df_carte)
 
 with tab_asst:
     render_assistant(df_scored)

@@ -7,3 +7,5 @@ plotly
 openpyxl
 numpy
 supabase>=2.0.0
+folium
+streamlit-folium

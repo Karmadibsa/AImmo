@@ -15,7 +15,7 @@ import streamlit as st
 
 from config import CSV_PATH, DVF_CSV_PATH, DVF_PM2_FILTERS, DVF_REGRESSION
 from analysis.regression import least_squares_fit, r_squared
-from ui.components import extract_tags
+from ui.components import build_tags_from_row
 
 # ── Mapping colonnes Supabase → noms attendus par l'app ──────────────────────
 # La table Supabase utilise des noms courts ; l'app utilise le schéma DVF.
@@ -115,9 +115,8 @@ def _process(df: pd.DataFrame) -> pd.DataFrame:
             df["date_mutation"] = pd.to_datetime(df[date_col], errors="coerce")
             break
 
-    # Tags NLP
-    if "description" in df.columns:
-        df["tags"] = df["description"].apply(extract_tags)
+    # Tags : colonnes booléennes Supabase en priorité, texte en complément
+    df["tags"] = [build_tags_from_row(row) for row in df.to_dict("records")]
 
     # DPE / GES / énergie — proviennent directement de l'API BienIci via Supabase.
     # On ne complète PAS par heuristiques textuelles : si la valeur est NULL en base,

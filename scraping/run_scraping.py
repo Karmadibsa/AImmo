@@ -226,7 +226,7 @@ def _parse_annonce(ad: dict) -> dict | None:
         "copro_procedure":    ad.get("isCondominiumInProcedure"),
         # ── Localisation ──────────────────────────────────────────────────────
         "latitude":           _to_float(pos.get("lat")),
-        "longitude":          _to_float(pos.get("lng")),
+        "longitude":          _to_float(pos.get("lon")),
         "exposition":         ad.get("exposition") or None,
         # ── Marché ────────────────────────────────────────────────────────────
         "prix_baisse":        ad.get("priceHasDecreased"),

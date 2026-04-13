@@ -98,6 +98,23 @@ def render_list(df: pd.DataFrame) -> None:
                         unsafe_allow_html=True,
                     )
 
+                # Badge DPE
+                dpe_val = row.get("dpe")
+                _DPE_COLORS = {
+                    "A": ("#00A651", "#fff"), "B": ("#51B747", "#fff"),
+                    "C": ("#A8CC3B", "#000"), "D": ("#FFED00", "#000"),
+                    "E": ("#F7931D", "#fff"), "F": ("#ED1C24", "#fff"),
+                    "G": ("#9B1B22", "#fff"),
+                }
+                if pd.notna(dpe_val) and str(dpe_val) in _DPE_COLORS:
+                    bg, fg = _DPE_COLORS[str(dpe_val)]
+                    st.markdown(
+                        f'<span style="background:{bg};color:{fg};padding:2px 10px;'
+                        f'border-radius:4px;font-weight:700;font-size:13px;">'
+                        f'DPE {dpe_val}</span>',
+                        unsafe_allow_html=True,
+                    )
+
                 info_lines = [
                     ("🏷️ Source",  source),
                     ("🏠 Type",    row.get("type_local", "—")),

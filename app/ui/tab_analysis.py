@@ -234,6 +234,21 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
             with st.spinner("Calcul de la régression multivariée (descente de gradient)…"):
                 df_mv = compute_multivariate_regression(df_reg)
 
+            # Indicateur DPE
+            dpe_coverage = (
+                df_reg["dpe"].notna().sum() / len(df_reg) * 100
+                if "dpe" in df_reg.columns and len(df_reg) > 0 else 0.0
+            )
+            dpe_used = dpe_coverage > 30.0
+            dpe_icon = "✅" if dpe_used else "⚠️"
+            st.caption(
+                f"**Modèle** : Surface + Pièces"
+                + (f" + DPE  {dpe_icon} (couverture DPE : {dpe_coverage:.0f} %)"
+                   if dpe_used else
+                   f" *(DPE exclu — couverture insuffisante : {dpe_coverage:.0f} %)*")
+                + "  ·  Algorithme : descente de gradient (from scratch, sans bibliothèque ML)"
+            )
+
             fig_mv = go.Figure()
             COLS = {"Appartement": "#E8714A", "Maison": "#1B2B4B"}
             for ttype, grp in df_mv.dropna(subset=["mv_prix_predit"]).groupby("type_local"):
@@ -277,6 +292,94 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
             st.warning(f"Régression multivariée non disponible : {exc}")
 
     st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── 5b. DPE — Distribution & Impact sur le prix ──────────────────────────
+    if "dpe" in df.columns and df["dpe"].notna().sum() >= 5:
+        st.markdown('<div class="section-card">', unsafe_allow_html=True)
+        st.markdown("#### 🌿 DPE — Distribution & Impact sur le prix")
+        st.caption(
+            "Le DPE (Diagnostic de Performance Énergétique) est extrait automatiquement "
+            "des descriptions d'annonces via un moteur de patterns (algorithme from scratch)."
+        )
+
+        col_dpe1, col_dpe2 = st.columns(2, gap="medium")
+
+        with col_dpe1:
+            # Distribution des classes DPE
+            DPE_ORDER = ["A", "B", "C", "D", "E", "F", "G"]
+            DPE_COLORS = {
+                "A": "#00A651", "B": "#51B747", "C": "#A8CC3B",
+                "D": "#FFED00", "E": "#F7931D", "F": "#ED1C24", "G": "#9B1B22",
+            }
+            dpe_counts = df["dpe"].value_counts().reindex(DPE_ORDER).dropna().astype(int)
+            if not dpe_counts.empty:
+                fig_dpe_dist = go.Figure(go.Bar(
+                    x=dpe_counts.index.tolist(),
+                    y=dpe_counts.values.tolist(),
+                    marker_color=[DPE_COLORS.get(d, "#94A3B8") for d in dpe_counts.index],
+                    text=dpe_counts.values.tolist(),
+                    textposition="outside",
+                ))
+                fig_dpe_dist.update_layout(
+                    title_text="Répartition des classes DPE",
+                    height=280, margin=dict(t=40, b=10, l=0, r=0),
+                    paper_bgcolor="white", plot_bgcolor="white",
+                    showlegend=False,
+                    xaxis_title="Classe DPE", yaxis_title="Annonces",
+                )
+                st.plotly_chart(fig_dpe_dist, use_container_width=True)
+                n_dpe = int(dpe_counts.sum())
+                n_tot = len(df)
+                st.caption(f"📊 {n_dpe} / {n_tot} annonces ({n_dpe/n_tot*100:.0f} %) disposent d'une classe DPE détectée.")
+            else:
+                st.info("Pas de données DPE disponibles.")
+
+        with col_dpe2:
+            # Prix/m² médian par classe DPE (from scratch)
+            df_dpe_prix = df.dropna(subset=["dpe", "prix_m2"])
+            df_dpe_prix = df_dpe_prix[df_dpe_prix["prix_m2"] > 0]
+            if not df_dpe_prix.empty:
+                rows_dpe = []
+                for classe in DPE_ORDER:
+                    vals = [float(v) for v in df_dpe_prix[df_dpe_prix["dpe"] == classe]["prix_m2"].tolist()]
+                    if len(vals) < 2:
+                        continue
+                    sorted_v = sorted(vals)
+                    n = len(sorted_v)
+                    mid = n // 2
+                    med = sorted_v[mid] if n % 2 != 0 else (sorted_v[mid - 1] + sorted_v[mid]) / 2
+                    rows_dpe.append({"DPE": classe, "Prix/m² médian": round(med), "N": n})
+
+                if rows_dpe:
+                    classes  = [r["DPE"] for r in rows_dpe]
+                    prix_med = [r["Prix/m² médian"] for r in rows_dpe]
+                    colors   = [DPE_COLORS.get(c, "#94A3B8") for c in classes]
+
+                    fig_dpe_prix = go.Figure(go.Bar(
+                        x=classes, y=prix_med,
+                        marker_color=colors,
+                        text=[f"{p:,} €/m²" for p in prix_med],
+                        textposition="outside",
+                    ))
+                    fig_dpe_prix.update_layout(
+                        title_text="Prix/m² médian par classe DPE",
+                        height=280, margin=dict(t=40, b=10, l=0, r=0),
+                        paper_bgcolor="white", plot_bgcolor="white",
+                        showlegend=False,
+                        xaxis_title="Classe DPE", yaxis_title="€/m²",
+                    )
+                    fig_dpe_prix.update_yaxes(tickformat=",.0f", ticksuffix=" €")
+                    st.plotly_chart(fig_dpe_prix, use_container_width=True)
+                    st.caption(
+                        "💡 Les biens en classe A/B sont souvent mieux valorisés ; "
+                        "les passoires thermiques (F/G) tendent à être décotées."
+                    )
+                else:
+                    st.info("Pas assez de données DPE par classe (min. 2 annonces).")
+            else:
+                st.info("Pas de données DPE avec prix/m² disponibles.")
+
+        st.markdown('</div>', unsafe_allow_html=True)
 
     # ── 6. Stats par quartier (Moyenne / Médiane / Écart-type) ───────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)

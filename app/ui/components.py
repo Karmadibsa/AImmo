@@ -76,8 +76,7 @@ def extract_tags(description: str) -> list[tuple[str, str]]:
 
 def photo_carousel(photos_raw, key: str) -> None:
     """
-    Affiche un carousel de photos avec navigation par radio buttons.
-    Utilise st.radio() → pas de st.rerun() explicite, 1 seul rerender natif.
+    Affiche un carousel de photos avec navigation ◀ / ▶.
 
     Args:
         photos_raw : str (JSON) ou list d'URLs.
@@ -107,17 +106,27 @@ def photo_carousel(photos_raw, key: str) -> None:
         _st.image(photos[0], use_container_width=True)
         return
 
-    # Navigation : radio horizontal avec numéros de photo
-    selected = _st.radio(
-        "Navigation photos",
-        options=list(range(n)),
-        format_func=lambda i: f"{'●' if True else '○'} {i + 1}",
-        horizontal=True,
-        key=f"carousel_{key}",
-        label_visibility="collapsed",
-    )
-    _st.image(photos[selected], use_container_width=True)
-    _st.caption(f"📷 Photo {selected + 1} / {n}")
+    # Index courant stocké en session_state
+    state_key = f"carousel_idx_{key}"
+    if state_key not in _st.session_state:
+        _st.session_state[state_key] = 0
+    idx = max(0, min(_st.session_state[state_key], n - 1))
+
+    _st.image(photos[idx], use_container_width=True)
+
+    col_prev, col_info, col_next = _st.columns([1, 3, 1])
+    with col_prev:
+        if _st.button("◀", key=f"car_prev_{key}", disabled=(idx == 0),
+                      use_container_width=True):
+            _st.session_state[state_key] = idx - 1
+            _st.rerun()
+    with col_info:
+        _st.caption(f"📷 {idx + 1} / {n}")
+    with col_next:
+        if _st.button("▶", key=f"car_next_{key}", disabled=(idx >= n - 1),
+                      use_container_width=True):
+            _st.session_state[state_key] = idx + 1
+            _st.rerun()
 
 
 def tags_html(tags: list[tuple[str, str]]) -> str:

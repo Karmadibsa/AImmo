@@ -128,29 +128,15 @@ def render_comparator(df: pd.DataFrame) -> None:
 
     # ── Zone de sélection ─────────────────────────────────────────────────────
     with st.container(border=True):
-        c1, c2, c3 = st.columns([2, 1, 1])
-        with c1:
-            search = st.text_input(
-                "🔍 Filtrer les biens",
-                placeholder="Titre, commune, mot-clé…",
-                key="cmp_search",
-                label_visibility="collapsed",
-            )
-        with c2:
-            types_dispo = ["Tous"] + sorted(df["type_local"].dropna().unique().tolist())
-            type_f = st.selectbox("Type", types_dispo, key="cmp_type",
-                                  label_visibility="collapsed")
-        with c3:
-            budget_f = st.number_input(
-                "Budget max €", value=int(df["valeur_fonciere"].max(skipna=True) or 500_000),
-                step=10_000, key="cmp_budget", label_visibility="collapsed",
-            )
+        # Recherche texte pour pré-filtrer la liste
+        search = st.text_input(
+            "🔍 Rechercher un bien",
+            placeholder="Tapez un titre, une commune, un quartier…",
+            key="cmp_search",
+        )
 
         # Filtrage du dataframe pour le multiselect
         df_sel = df.copy()
-        if type_f != "Tous":
-            df_sel = df_sel[df_sel["type_local"] == type_f]
-        df_sel = df_sel[df_sel["valeur_fonciere"].fillna(0) <= budget_f]
         if search:
             mask = (
                 df_sel["titre"].fillna("").str.contains(search, case=False) |
@@ -161,8 +147,8 @@ def render_comparator(df: pd.DataFrame) -> None:
 
         # Construction des labels pour le multiselect
         def _make_label(row) -> str:
-            t     = str(row.get("type_local", "Bien"))[:12]
-            titre = str(row.get("titre", ""))[:35]
+            t     = str(row.get("type_local", "Bien"))[:10]
+            titre = str(row.get("titre", ""))[:40]
             prix  = row.get("valeur_fonciere")
             surf  = row.get("surface_reelle_bati")
             comm  = str(row.get("nom_commune", ""))
@@ -175,27 +161,29 @@ def render_comparator(df: pd.DataFrame) -> None:
         labels     = [_make_label(r) for _, r in df_sel.iterrows()]
         url_by_lbl = {lbl: row.get("url", "") for lbl, (_, row) in zip(labels, df_sel.iterrows())}
 
-        selected_labels = st.multiselect(
-            f"Choisir les biens à comparer (max {MAX_COMPARE})",
-            options=labels,
-            max_selections=MAX_COMPARE,
-            placeholder="Tapez pour filtrer puis sélectionnez…",
-            key="cmp_selected",
-        )
-
-        col_info, col_reset = st.columns([6, 1])
-        with col_info:
-            n_sel = len(selected_labels)
-            if n_sel == 0:
-                st.caption("Sélectionnez au moins 2 biens pour lancer la comparaison.")
-            elif n_sel == 1:
-                st.caption("Ajoutez encore au moins 1 bien.")
-            else:
-                st.caption(f"✅ {n_sel} biens sélectionnés — comparaison ci-dessous.")
+        col_select, col_reset = st.columns([8, 1])
+        with col_select:
+            selected_labels = st.multiselect(
+                f"Sélectionner les biens à comparer (2 à {MAX_COMPARE} maximum)",
+                options=labels,
+                max_selections=MAX_COMPARE,
+                placeholder="Sélectionnez un bien…",
+                key="cmp_selected",
+            )
         with col_reset:
-            if st.button("🗑️ Vider", key="cmp_clear", use_container_width=True):
+            st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
+            if st.button("🗑️", key="cmp_clear", use_container_width=True,
+                         help="Vider la sélection"):
                 st.session_state["cmp_selected"] = []
                 st.rerun()
+
+        n_sel = len(selected_labels)
+        if n_sel == 0:
+            st.caption("Sélectionnez au moins 2 biens pour lancer la comparaison.")
+        elif n_sel == 1:
+            st.caption("Ajoutez encore au moins 1 bien.")
+        else:
+            st.caption(f"✅ {n_sel} biens sélectionnés — comparaison ci-dessous.")
 
     if len(selected_labels) < 2:
         return

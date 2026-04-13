@@ -76,12 +76,12 @@ def extract_tags(description: str) -> list[tuple[str, str]]:
 
 def photo_carousel(photos_raw, key: str) -> None:
     """
-    Affiche les photos d'une annonce en grille (max 3 colonnes).
-    Pas de st.rerun() — aucun impact sur les performances globales.
+    Affiche un carousel de photos avec navigation par radio buttons.
+    Utilise st.radio() → pas de st.rerun() explicite, 1 seul rerender natif.
 
     Args:
         photos_raw : str (JSON) ou list d'URLs.
-        key        : identifiant unique (non utilisé, conservé pour compatibilité).
+        key        : identifiant unique pour éviter les conflits de widget.
     """
     import json as _json
     import streamlit as _st
@@ -101,14 +101,23 @@ def photo_carousel(photos_raw, key: str) -> None:
     if not photos:
         return
 
-    # Affiche jusqu'à 3 photos côte à côte (les autres sont ignorées pour la perf)
-    show = photos[:3]
-    cols = _st.columns(len(show))
-    for col, url in zip(cols, show):
-        col.image(url, use_container_width=True)
+    n = len(photos)
 
-    if len(photos) > 3:
-        _st.caption(f"📷 {len(photos)} photos disponibles sur l'annonce")
+    if n == 1:
+        _st.image(photos[0], use_container_width=True)
+        return
+
+    # Navigation : radio horizontal avec numéros de photo
+    selected = _st.radio(
+        "Navigation photos",
+        options=list(range(n)),
+        format_func=lambda i: f"{'●' if True else '○'} {i + 1}",
+        horizontal=True,
+        key=f"carousel_{key}",
+        label_visibility="collapsed",
+    )
+    _st.image(photos[selected], use_container_width=True)
+    _st.caption(f"📷 Photo {selected + 1} / {n}")
 
 
 def tags_html(tags: list[tuple[str, str]]) -> str:

@@ -161,6 +161,12 @@ def render_comparator(df: pd.DataFrame) -> None:
         labels     = [_make_label(r) for _, r in df_sel.iterrows()]
         url_by_lbl = {lbl: row.get("url", "") for lbl, (_, row) in zip(labels, df_sel.iterrows())}
 
+        # Compteur de reset : changer le key du multiselect force sa réinitialisation
+        # (écrire directement dans session_state["cmp_selected"] lève une exception Streamlit)
+        if "cmp_reset_count" not in st.session_state:
+            st.session_state["cmp_reset_count"] = 0
+        reset_n = st.session_state["cmp_reset_count"]
+
         col_select, col_reset = st.columns([8, 1])
         with col_select:
             selected_labels = st.multiselect(
@@ -168,13 +174,13 @@ def render_comparator(df: pd.DataFrame) -> None:
                 options=labels,
                 max_selections=MAX_COMPARE,
                 placeholder="Sélectionnez un bien…",
-                key="cmp_selected",
+                key=f"cmp_selected_{reset_n}",
             )
         with col_reset:
             st.markdown("<div style='margin-top:28px'></div>", unsafe_allow_html=True)
             if st.button("🗑️", key="cmp_clear", use_container_width=True,
                          help="Vider la sélection"):
-                st.session_state["cmp_selected"] = []
+                st.session_state["cmp_reset_count"] += 1
                 st.rerun()
 
         n_sel = len(selected_labels)

@@ -1,7 +1,8 @@
 """
 Composants HTML réutilisables et helpers NLP.
-Pas de dépendance Streamlit — utilisable dans tests unitaires.
 """
+
+import streamlit as st
 
 from config import NLP_TAGS
 
@@ -74,16 +75,17 @@ def extract_tags(description: str) -> list[tuple[str, str]]:
     return [(lbl, css) for lbl, (kws, css) in NLP_TAGS.items() if any(k in d for k in kws)]
 
 
+@st.fragment
 def photo_carousel(photos_raw, key: str) -> None:
     """
     Affiche un carousel de photos avec navigation ◀ / ▶.
+    @st.fragment isole le rerun au carousel uniquement — pas de freeze global.
 
     Args:
         photos_raw : str (JSON) ou list d'URLs.
         key        : identifiant unique pour éviter les conflits de widget.
     """
     import json as _json
-    import streamlit as _st
 
     # Parse le JSON si nécessaire
     if isinstance(photos_raw, str):
@@ -103,30 +105,30 @@ def photo_carousel(photos_raw, key: str) -> None:
     n = len(photos)
 
     if n == 1:
-        _st.image(photos[0], use_container_width=True)
+        st.image(photos[0], use_container_width=True)
         return
 
     # Index courant stocké en session_state
     state_key = f"carousel_idx_{key}"
-    if state_key not in _st.session_state:
-        _st.session_state[state_key] = 0
-    idx = max(0, min(_st.session_state[state_key], n - 1))
+    if state_key not in st.session_state:
+        st.session_state[state_key] = 0
+    idx = max(0, min(st.session_state[state_key], n - 1))
 
-    _st.image(photos[idx], use_container_width=True)
+    st.image(photos[idx], use_container_width=True)
 
-    col_prev, col_info, col_next = _st.columns([1, 3, 1])
+    col_prev, col_info, col_next = st.columns([1, 3, 1])
     with col_prev:
-        if _st.button("◀", key=f"car_prev_{key}", disabled=(idx == 0),
-                      use_container_width=True):
-            _st.session_state[state_key] = idx - 1
-            _st.rerun()
+        if st.button("◀", key=f"car_prev_{key}", disabled=(idx == 0),
+                     use_container_width=True):
+            st.session_state[state_key] = idx - 1
+            st.rerun()
     with col_info:
-        _st.caption(f"📷 {idx + 1} / {n}")
+        st.caption(f"📷 {idx + 1} / {n}")
     with col_next:
-        if _st.button("▶", key=f"car_next_{key}", disabled=(idx >= n - 1),
-                      use_container_width=True):
-            _st.session_state[state_key] = idx + 1
-            _st.rerun()
+        if st.button("▶", key=f"car_next_{key}", disabled=(idx >= n - 1),
+                     use_container_width=True):
+            st.session_state[state_key] = idx + 1
+            st.rerun()
 
 
 def tags_html(tags: list[tuple[str, str]]) -> str:

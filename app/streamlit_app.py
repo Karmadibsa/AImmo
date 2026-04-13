@@ -77,6 +77,8 @@ with st.sidebar:
 
     keyword = st.text_input("🔍 Mot-clé", placeholder="terrasse, parking…")
 
+    prix_baisse_only = st.checkbox("📉 Prix en baisse uniquement")
+
     st.markdown("---")
     if not df_raw.empty and "date_mutation" in df_raw.columns:
         last_upd = df_raw["date_mutation"].max()
@@ -114,6 +116,8 @@ if keyword:
         df["titre"].fillna("").str.contains(keyword, case=False)
     )
     df = df[mask_kw]
+if prix_baisse_only and "prix_baisse" in df.columns:
+    df = df[df["prix_baisse"] == True]
 
 # ── Régressions ────────────────────────────────────────────────────────────────
 df_scored = (

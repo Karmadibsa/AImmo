@@ -35,7 +35,9 @@ def render_list(df: pd.DataFrame) -> None:
         "surface_reelle_bati":       "Surface (m²)",
         "nombre_pieces_principales": "Pièces",
         "prix_m2":                   "€/m²",
+        "dpe":                       "DPE",
         "nom_commune":               "Commune",
+        "prix_baisse":               "📉",
         "url":                       "Lien",
     }
     df_disp = (
@@ -55,6 +57,8 @@ def render_list(df: pd.DataFrame) -> None:
             "Surface (m²)": st.column_config.NumberColumn("Surface (m²)", format="%.0f m²"),
             "€/m²":         st.column_config.NumberColumn("€/m²",         format="%.0f €"),
             "Pièces":       st.column_config.NumberColumn("Pièces",        format="%d"),
+            "DPE":          st.column_config.TextColumn("DPE", width="small"),
+            "📉":           st.column_config.CheckboxColumn("📉 Baisse"),
         },
         height=360,
     )
@@ -63,17 +67,20 @@ def render_list(df: pd.DataFrame) -> None:
     st.markdown("#### 🔍 Fiches détaillées")
 
     for idx_int, (_, row) in enumerate(df.iterrows()):
-        titre   = str(row.get("titre", "Annonce sans titre"))
-        prix    = row.get("valeur_fonciere")
-        surface = row.get("surface_reelle_bati")
-        pm2     = row.get("prix_m2")
-        ep_lst  = row.get("ecart_pct")
-        tags    = row.get("tags", [])
-        source  = str(row.get("source", "")).upper()
+        titre       = str(row.get("titre", "Annonce sans titre"))
+        prix        = row.get("valeur_fonciere")
+        surface     = row.get("surface_reelle_bati")
+        pm2         = row.get("prix_m2")
+        ep_lst      = row.get("ecart_pct")
+        tags        = row.get("tags", [])
+        source      = str(row.get("source", "")).upper()
+        prix_baisse = row.get("prix_baisse")
+        annee_constr= row.get("annee_construction")
 
         lbl = titre
         if pd.notna(prix):    lbl += f"  ·  {prix:,.0f} €"
         if pd.notna(surface): lbl += f"  ·  {surface:.0f} m²"
+        if prix_baisse is True or prix_baisse == 1: lbl += "  📉"
         if pd.notna(ep_lst):
             ep_f = float(ep_lst)
             if ep_f < -10:  lbl += "  🎯"
@@ -81,6 +88,18 @@ def render_list(df: pd.DataFrame) -> None:
             elif ep_f > 10: lbl += "  ⚠️"
 
         with st.expander(lbl):
+            # Photo principale (si disponible)
+            photos = row.get("photos")
+            if photos:
+                try:
+                    import json as _json
+                    if isinstance(photos, str):
+                        photos = _json.loads(photos)
+                    if isinstance(photos, list) and photos:
+                        st.image(photos[0], use_container_width=True)
+                except Exception:
+                    pass
+
             left, right = st.columns([1, 2], gap="medium")
 
             with left:
@@ -141,12 +160,21 @@ def render_list(df: pd.DataFrame) -> None:
                      if pd.notna(row.get("nombre_pieces_principales")) else "—"),
                     ("📍 Commune", row.get("nom_commune", "—")),
                 ]
+                if pd.notna(annee_constr) and annee_constr:
+                    info_lines.append(("🏗️ Construction", str(int(annee_constr))))
+                if prix_baisse is True or prix_baisse == 1:
+                    info_lines.append(("📉 Prix", "**En baisse récente**"))
+
                 for icon_lbl, val in info_lines:
                     st.markdown(f"**{icon_lbl}** : {val}")
 
                 url = row.get("url")
                 if pd.notna(url) and url:
                     st.markdown(f"[🔗 Voir l'annonce →]({url})")
+
+                visite = row.get("visite_virtuelle")
+                if pd.notna(visite) and visite:
+                    st.markdown(f"[🥽 Visite virtuelle →]({visite})")
 
             with right:
                 if tags:

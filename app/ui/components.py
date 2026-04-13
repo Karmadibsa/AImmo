@@ -74,6 +74,70 @@ def extract_tags(description: str) -> list[tuple[str, str]]:
     return [(lbl, css) for lbl, (kws, css) in NLP_TAGS.items() if any(k in d for k in kws)]
 
 
+def photo_carousel(photos_raw, key: str) -> None:
+    """
+    Affiche un carousel prev/next pour une liste de photos.
+
+    Args:
+        photos_raw : str (JSON) ou list d'URLs.
+        key        : identifiant unique pour st.session_state (ex: url de l'annonce).
+    """
+    import json as _json
+    import streamlit as _st
+
+    # Parse le JSON si nécessaire
+    if isinstance(photos_raw, str):
+        try:
+            photos = _json.loads(photos_raw)
+        except Exception:
+            return
+    elif isinstance(photos_raw, list):
+        photos = photos_raw
+    else:
+        return
+
+    photos = [p for p in photos if isinstance(p, str) and p.startswith("http")]
+    if not photos:
+        return
+
+    n = len(photos)
+    sk = f"_photo_idx_{key}"
+    if sk not in _st.session_state:
+        _st.session_state[sk] = 0
+
+    idx = _st.session_state[sk]
+
+    # Image principale (taille contenue)
+    _st.image(photos[idx], use_container_width=True)
+
+    # Navigation + compteur
+    if n > 1:
+        col_prev, col_counter, col_next = _st.columns([1, 2, 1])
+        with col_prev:
+            if _st.button("◀", key=f"{sk}_prev", use_container_width=True):
+                _st.session_state[sk] = (idx - 1) % n
+                _st.rerun()
+        with col_counter:
+            _st.caption(f"Photo {idx + 1} / {n}")
+        with col_next:
+            if _st.button("▶", key=f"{sk}_next", use_container_width=True):
+                _st.session_state[sk] = (idx + 1) % n
+                _st.rerun()
+
+        # Miniatures cliquables (max 5)
+        if n > 1:
+            thumb_cols = _st.columns(min(n, 5))
+            for i, tc in enumerate(thumb_cols):
+                if i >= n:
+                    break
+                border = "3px solid #E8714A" if i == idx else "2px solid transparent"
+                tc.markdown(
+                    f'<img src="{photos[i]}" style="width:100%;height:48px;'
+                    f'object-fit:cover;border-radius:4px;border:{border};cursor:pointer;">',
+                    unsafe_allow_html=True,
+                )
+
+
 def tags_html(tags: list[tuple[str, str]]) -> str:
     """Génère le HTML pour afficher les tags NLP."""
     return "".join(f'<span class="tag {css}">{lbl}</span>' for lbl, css in tags)

@@ -8,7 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from config import DVF_REGRESSION
-from ui.components import market_badge_html, tags_html
+from ui.components import market_badge_html, photo_carousel, tags_html
 
 
 def render_opportunities(
@@ -308,6 +308,12 @@ def render_opportunities(
                     if pd.notna(url) and url:
                         st.markdown(f"[🔗 Voir l'annonce →]({url})")
                 with right:
+                    # Carousel photos
+                    _photos_raw = row.get("photos")
+                    if _photos_raw is not None:
+                        _opp_key = str(row.get("url", _))
+                        photo_carousel(_photos_raw, key=f"opp_{_opp_key}")
+
                     if tags:
                         st.markdown(tags_html(tags), unsafe_allow_html=True)
                     desc = str(row.get("description", "")).strip()

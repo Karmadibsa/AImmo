@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-from ui.components import market_badge_html, tags_html
+from ui.components import market_badge_html, photo_carousel, tags_html
 
 # Import du moteur k-NN from scratch
 try:
@@ -88,18 +88,6 @@ def render_list(df: pd.DataFrame) -> None:
             elif ep_f > 10: lbl += "  ⚠️"
 
         with st.expander(lbl):
-            # Photo principale (si disponible)
-            photos = row.get("photos")
-            if photos:
-                try:
-                    import json as _json
-                    if isinstance(photos, str):
-                        photos = _json.loads(photos)
-                    if isinstance(photos, list) and photos:
-                        st.image(photos[0], use_container_width=True)
-                except Exception:
-                    pass
-
             left, right = st.columns([1, 2], gap="medium")
 
             with left:
@@ -177,6 +165,12 @@ def render_list(df: pd.DataFrame) -> None:
                     st.markdown(f"[🥽 Visite virtuelle →]({visite})")
 
             with right:
+                # Carousel photos
+                _photos_raw = row.get("photos")
+                if _photos_raw is not None:
+                    _card_key = str(row.get("url", idx_int))
+                    photo_carousel(_photos_raw, key=f"list_{_card_key}")
+
                 if tags:
                     st.markdown(tags_html(tags), unsafe_allow_html=True)
                 desc = str(row.get("description", "")).strip()

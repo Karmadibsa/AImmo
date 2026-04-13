@@ -146,17 +146,16 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
     # ── 5. Analyse de régression — au choix ──────────────────────────────────
     st.markdown('<div class="section-card">', unsafe_allow_html=True)
     st.markdown("#### 📈 Analyse de régression")
-    col_sel, _ = st.columns([2, 3])
-    with col_sel:
-        reg_mode = st.selectbox(
-            "Type d'analyse",
-            [
-                "📈 Régression linéaire (Prix ~ Surface)",
-                "📍 Prix/m² moyen par quartier",
-                "📊 Régression multivariée (Surface + Pièces + DPE)",
-            ],
-            key="reg_mode_select",
-        )
+    reg_mode = st.radio(
+        "Type d'analyse",
+        [
+            "📈 Régression linéaire (Prix ~ Surface)",
+            "📍 Prix/m² moyen par quartier",
+            "📊 Régression multivariée (Surface + Pièces + DPE)",
+        ],
+        horizontal=True,
+        key="reg_mode_select",
+    )
 
     df_reg = df.dropna(subset=["valeur_fonciere", "surface_reelle_bati"])
 
@@ -253,12 +252,16 @@ def render_analysis(df: pd.DataFrame, df_dvf: pd.DataFrame | None = None) -> Non
                     text=grp["titre"].fillna("").tolist(),
                     hovertemplate="<b>%{text}</b><br>%{x:.0f} m² → %{y:,.0f} €<extra>" + ttype + r2_lbl + "</extra>",
                 ))
-                # Droite de tendance multivariée (surface uniquement pour la ligne)
-                xs = sorted(grp["surface_reelle_bati"].dropna().tolist())
-                ys = grp.set_index("surface_reelle_bati")["mv_prix_predit"].reindex(xs, method="nearest").tolist()
-                if xs:
+                # Droite de tendance multivariée (2 points : x_min → x_max)
+                # On évite set_index car surface_reelle_bati peut avoir des doublons
+                grp_tend = grp.dropna(subset=["surface_reelle_bati", "mv_prix_predit"]).sort_values("surface_reelle_bati")
+                if len(grp_tend) >= 2:
+                    x_tend = [float(grp_tend["surface_reelle_bati"].iloc[0]),
+                               float(grp_tend["surface_reelle_bati"].iloc[-1])]
+                    y_tend = [float(grp_tend["mv_prix_predit"].iloc[0]),
+                               float(grp_tend["mv_prix_predit"].iloc[-1])]
                     fig_mv.add_trace(go.Scatter(
-                        x=[xs[0], xs[-1]], y=[ys[0], ys[-1]],
+                        x=x_tend, y=y_tend,
                         mode="lines", name=f"Tendance {ttype} (MV)",
                         line=dict(color=c, width=2, dash="dot"),
                     ))

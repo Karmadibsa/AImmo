@@ -1,6 +1,5 @@
 """Onglet 2 — Liste des biens avec tableau + fiches détaillées."""
 
-import json
 import sys
 from pathlib import Path
 
@@ -21,6 +20,104 @@ except Exception:
 
 PAGE_SIZE = 20  # nombre de fiches par page
 
+# Badges DPE / GES — définis une seule fois (évite redéfinition dans la boucle)
+_DPE_COLORS = {
+    "A": ("#00A651", "#fff"), "B": ("#51B747", "#fff"),
+    "C": ("#A8CC3B", "#000"), "D": ("#FFED00", "#000"),
+    "E": ("#F7931D", "#fff"), "F": ("#ED1C24", "#fff"),
+    "G": ("#9B1B22", "#fff"),
+}
+_GES_COLORS = {
+    "A": ("#E8F5E9", "#1B5E20"), "B": ("#C8E6C9", "#1B5E20"),
+    "C": ("#A5D6A7", "#1B5E20"), "D": ("#EDE7F6", "#4A148C"),
+    "E": ("#CE93D8", "#fff"),    "F": ("#AB47BC", "#fff"),
+    "G": ("#6A1B9A", "#fff"),
+}
+
+
+# ── Pagination helpers ────────────────────────────────────────────────────────
+
+def _page_slots(current: int, n_pages: int) -> list:
+    """
+    Retourne la liste des slots de pagination (numéros 1-indexés + '…').
+    Fenêtre intelligente : toujours page 1, page N, et ±2 autour de la page courante.
+
+    Exemple (page 5 sur 20) : [1, '…', 3, 4, 5, 6, 7, '…', 20]
+    """
+    if n_pages <= 9:
+        return list(range(1, n_pages + 1))
+
+    current_1 = current + 1  # passage en 1-indexé
+    visible: set[int] = {1, n_pages}
+    for p in range(max(2, current_1 - 2), min(n_pages, current_1 + 3)):
+        visible.add(p)
+
+    result: list = []
+    prev = 0
+    for s in sorted(visible):
+        if s - prev > 1:
+            result.append("…")
+        result.append(s)
+        prev = s
+    return result
+
+
+def _pagination_bar(page: int, n_pages: int, page_key: str, suffix: str = "") -> None:
+    """
+    Affiche une barre de pagination complète :
+    ◀  1  …  4  [5]  6  …  70  ▶
+
+    - ◀ / ▶ : page précédente / suivante
+    - numéros : saut direct à la page, page courante grisée (disabled)
+    - … : ellipsis non-cliquable
+    """
+    if n_pages <= 1:
+        return
+
+    slots = _page_slots(page, n_pages)
+
+    # Largeurs : ◀ | slots | ▶
+    # Les ellipsis ont une largeur plus faible
+    widths = [1] + [0.5 if s == "…" else 1 for s in slots] + [1]
+    cols = st.columns(widths)
+
+    # ◀ Précédent
+    with cols[0]:
+        if st.button("◀", disabled=(page == 0),
+                     key=f"prev_{suffix}", use_container_width=True):
+            st.session_state[page_key] -= 1
+            st.rerun()
+
+    # Numéros de page + ellipsis
+    for i, slot in enumerate(slots):
+        with cols[i + 1]:
+            if slot == "…":
+                st.markdown(
+                    '<p style="text-align:center;margin:6px 0;color:#94a3b8;">…</p>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                p_idx = slot - 1  # 0-indexé
+                is_current = (p_idx == page)
+                btn_label = f"**{slot}**" if is_current else str(slot)
+                if st.button(
+                    btn_label,
+                    key=f"pg_{slot}_{suffix}",
+                    use_container_width=True,
+                    disabled=is_current,
+                ):
+                    st.session_state[page_key] = p_idx
+                    st.rerun()
+
+    # Suivant ▶
+    with cols[-1]:
+        if st.button("▶", disabled=(page >= n_pages - 1),
+                     key=f"next_{suffix}", use_container_width=True):
+            st.session_state[page_key] += 1
+            st.rerun()
+
+
+# ── Rendu principal ───────────────────────────────────────────────────────────
 
 def render_list(df: pd.DataFrame) -> None:
     st.markdown(f"**{len(df):,} bien(s)** correspondent à vos critères")
@@ -69,33 +166,25 @@ def render_list(df: pd.DataFrame) -> None:
     st.markdown("---")
     st.markdown("#### 🔍 Fiches détaillées")
 
-    # ── Pagination ────────────────────────────────────────────────────────────
-    total    = len(df)
-    n_pages  = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+    # ── État de pagination ────────────────────────────────────────────────────
+    total   = len(df)
+    n_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
     page_key = "list_page"
     if page_key not in st.session_state:
         st.session_state[page_key] = 0
-    # Reset si les filtres ont changé et la page dépasse
     if st.session_state[page_key] >= n_pages:
         st.session_state[page_key] = 0
 
-    page = st.session_state[page_key]
+    page  = st.session_state[page_key]
     start = page * PAGE_SIZE
     end   = min(start + PAGE_SIZE, total)
     df_page = df.iloc[start:end].copy()
 
-    # Barre de navigation
-    col_prev, col_info, col_next = st.columns([1, 3, 1])
-    with col_prev:
-        if st.button("◀ Précédent", disabled=(page == 0), use_container_width=True):
-            st.session_state[page_key] -= 1
-            st.rerun()
-    with col_info:
-        st.caption(f"Biens {start + 1}–{end} sur {total} · Page {page + 1}/{n_pages}")
-    with col_next:
-        if st.button("Suivant ▶", disabled=(page >= n_pages - 1), use_container_width=True):
-            st.session_state[page_key] += 1
-            st.rerun()
+    # ── Barre de pagination haute ─────────────────────────────────────────────
+    st.caption(f"Biens {start + 1}–{end} sur {total}  ·  Page {page + 1} / {n_pages}")
+    _pagination_bar(page, n_pages, page_key, suffix="top")
+
+    st.markdown("")  # espace visuel
 
     # ── Fiches de la page courante ────────────────────────────────────────────
     for idx_int, (_, row) in enumerate(df_page.iterrows()):
@@ -139,18 +228,6 @@ def render_list(df: pd.DataFrame) -> None:
                     )
 
                 # Badges DPE + GES
-                _DPE_COLORS = {
-                    "A": ("#00A651", "#fff"), "B": ("#51B747", "#fff"),
-                    "C": ("#A8CC3B", "#000"), "D": ("#FFED00", "#000"),
-                    "E": ("#F7931D", "#fff"), "F": ("#ED1C24", "#fff"),
-                    "G": ("#9B1B22", "#fff"),
-                }
-                _GES_COLORS = {
-                    "A": ("#E8F5E9", "#1B5E20"), "B": ("#C8E6C9", "#1B5E20"),
-                    "C": ("#A5D6A7", "#1B5E20"), "D": ("#EDE7F6", "#4A148C"),
-                    "E": ("#CE93D8", "#fff"),    "F": ("#AB47BC", "#fff"),
-                    "G": ("#6A1B9A", "#fff"),
-                }
                 dpe_val = row.get("dpe")
                 ges_val = row.get("ges")
                 nrj_val = row.get("energie_valeur")
@@ -198,7 +275,6 @@ def render_list(df: pd.DataFrame) -> None:
                     st.markdown(f"[🥽 Visite virtuelle →]({visite})")
 
             with right:
-                # Carousel photos (sans rerun — 3 photos en colonnes)
                 _photos_raw = row.get("photos")
                 if _photos_raw is not None:
                     _card_key = str(row.get("url", global_idx))
@@ -223,7 +299,8 @@ def render_list(df: pd.DataFrame) -> None:
                     st.session_state[knn_key] = False
 
                 if not st.session_state[knn_key]:
-                    if st.button("🔍 Voir les biens similaires", key=f"knn_btn_{global_idx}_p{page}"):
+                    if st.button("🔍 Voir les biens similaires",
+                                 key=f"knn_btn_{global_idx}_p{page}"):
                         st.session_state[knn_key] = True
                         st.rerun()
                 else:
@@ -245,30 +322,22 @@ def render_list(df: pd.DataFrame) -> None:
                                 s_sim_pct = sim.get("_similarite_pct", 0)
                                 s_url     = sim.get("url", "")
                                 prix_str  = f"{s_prix:,.0f} €"  if pd.notna(s_prix) else "—"
-                                surf_str  = f"{s_surf:.0f} m²" if pd.notna(s_surf) else "—"
+                                surf_str  = f"{s_surf:.0f} m²"  if pd.notna(s_surf) else "—"
                                 st.markdown(
                                     f'<div class="section-card" style="padding:10px 14px;">'
                                     f'<small style="color:#64748B;">{s_sim_pct:.0f}% similaire</small><br>'
                                     f'<b style="font-size:12px;">{s_titre}…</b><br>'
                                     f'<span style="color:#1B2B4B;font-weight:700;">{prix_str}</span>'
                                     f' · <span style="color:#64748B;">{surf_str}</span><br>'
-                                    + (f'<a href="{s_url}" target="_blank" style="font-size:11px;">🔗 Voir</a>' if s_url else "")
+                                    + (f'<a href="{s_url}" target="_blank" '
+                                       f'style="font-size:11px;">🔗 Voir</a>' if s_url else "")
                                     + '</div>',
                                     unsafe_allow_html=True,
                                 )
                     except Exception:
                         pass
 
-    # Navigation bas de page
+    # ── Barre de pagination basse ─────────────────────────────────────────────
     st.markdown("---")
-    col_prev2, col_info2, col_next2 = st.columns([1, 3, 1])
-    with col_prev2:
-        if st.button("◀ Précédent", key="prev_bot", disabled=(page == 0), use_container_width=True):
-            st.session_state[page_key] -= 1
-            st.rerun()
-    with col_info2:
-        st.caption(f"Page {page + 1} / {n_pages}")
-    with col_next2:
-        if st.button("Suivant ▶", key="next_bot", disabled=(page >= n_pages - 1), use_container_width=True):
-            st.session_state[page_key] += 1
-            st.rerun()
+    st.caption(f"Page {page + 1} / {n_pages}")
+    _pagination_bar(page, n_pages, page_key, suffix="bot")
